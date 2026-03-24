@@ -23,6 +23,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# ── Bash version check (associative arrays require bash 4+) ──────────────
+if (( BASH_VERSINFO[0] < 4 )); then
+    echo "ERROR: bash 4+ required (found bash ${BASH_VERSION})."
+    echo "       macOS ships with bash 3.2 — install a newer bash:"
+    echo "         brew install bash"
+    echo "       Then re-run with: /opt/homebrew/bin/bash $0 $*"
+    exit 1
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,9 +47,17 @@ PHASES_CONFIG="${PROJECT_ROOT}/config/phases.yaml"
 # Default mode
 MODE=3
 
-# Models
-HEAVY_MODEL="${HEAVY_MODEL:-claude-opus-4}"
-ROTATION_POOL=("claude-sonnet-4" "gpt-4.1" "claude-sonnet-4")
+# MODEL ROUTING STRATEGY:
+#   Mode 1 (Full Parallel) : claude-opus-4.6   — heaviest phase gets opus
+#   Mode 2 (Token-Optimized): claude-sonnet-4.6 — single session, sonnet only
+#   Mode 3 (Hybrid)         : claude-sonnet-4.6 — heaviest group gets sonnet
+#   Rotate models: sonnet-4.6 → sonnet-4.5 → gpt-5.3-codex → gpt-5.4 (round-robin)
+#                  Used for: all other phases, conflict-resolver, post-merge review,
+#                            docs sync, quality gate remediation, integration remediation
+#
+MODEL_HEAVY="${MODEL_HEAVY:-claude-opus-4.6}"           # Mode 1 only
+MODEL_HEAVY_LITE="${MODEL_HEAVY_LITE:-claude-sonnet-4.6}" # Modes 2 & 3
+MODEL_ROTATE_POOL=("claude-sonnet-4.6" "claude-sonnet-4.5" "gpt-5.3-codex" "gpt-5.4")
 ROTATION_INDEX=0
 
 # ── Per-stage retry limits (bounded — no infinite loops) ──────────────────
@@ -101,10 +118,11 @@ load_phase_config() {
     fi
 
     # Parse YAML with Python (stdlib only — no PyYAML required)
-    eval "$(python3 -c "
+    # Uses a quoted heredoc (<<'PYEOF') to avoid bash/python quoting conflicts
+    eval "$(python3 - "${PHASES_CONFIG}" <<'PYEOF'
 import re, sys
 
-config_path = '${PHASES_CONFIG}'
+config_path = sys.argv[1]
 try:
     with open(config_path) as f:
         content = f.read()
@@ -133,7 +151,7 @@ for line in content.split('\n'):
         phases[current_phase] = {}
         continue
     if current_phase and indent >= 4:
-        kv = re.match(r'(\w+):\s*[\"\\']?([^\"\\']*)[\"\\'\\s]*$', stripped)
+        kv = re.match(r"(\w+):\s*[\"']?([^\"']*)[\"'\s]*$", stripped)
         if kv:
             phases[current_phase][kv.group(1)] = kv.group(2).strip()
 
@@ -142,11 +160,12 @@ for num, data in sorted(phases.items(), key=lambda x: int(x[0])):
     complexity = data.get('complexity', '5')
     group = data.get('group', 'A')
     skills = data.get('skills', 'dto, modularity')
-    print(f'PHASE_NAMES[{num}]=\"{name}\"')
+    print(f'PHASE_NAMES[{num}]="{name}"')
     print(f'PHASE_COMPLEXITY[{num}]={complexity}')
-    print(f'PHASE_TO_GROUP[{num}]=\"{group}\"')
-    print(f'PHASE_SKILLS[{num}]=\"{skills}\"')
-")"
+    print(f'PHASE_TO_GROUP[{num}]="{group}"')
+    print(f'PHASE_SKILLS[{num}]="{skills}"')
+PYEOF
+)"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -176,8 +195,8 @@ ensure_dirs() {
 }
 
 next_model() {
-    local model="${ROTATION_POOL[${ROTATION_INDEX}]}"
-    ROTATION_INDEX=$(( (ROTATION_INDEX + 1) % ${#ROTATION_POOL[@]} ))
+    local model="${MODEL_ROTATE_POOL[${ROTATION_INDEX}]}"
+    ROTATION_INDEX=$(( (ROTATION_INDEX + 1) % ${#MODEL_ROTATE_POOL[@]} ))
     echo "${model}"
 }
 
@@ -1023,7 +1042,7 @@ run_mode_1() {
 
     log_header "Mode 1 — Full Parallel"
     log_info "Phases: ${phases[*]}"
-    log_info "Heaviest phase: ${heaviest} (gets ${HEAVY_MODEL})"
+    log_info "Heaviest phase: ${heaviest} (gets ${MODEL_HEAVY})"
     log_info "Max parallel agents: ${MAX_PARALLEL_AGENTS}"
 
     check_clean_worktree
@@ -1061,7 +1080,7 @@ run_mode_1() {
         local model
 
         if [[ "${phase}" == "${heaviest}" ]]; then
-            model="${HEAVY_MODEL}"
+            model="${MODEL_HEAVY}"
         else
             model=$(next_model)
         fi
@@ -1149,14 +1168,7 @@ run_mode_2() {
 
     save_state 2 "${phases[*]}" "${INTEGRATION_BRANCH}" "${branch}"
 
-    local heaviest
-    heaviest=$(heaviest_phase "${phases[@]}")
-    local model
-    if (( ${#phases[@]} >= 3 )); then
-        model="${HEAVY_MODEL}"
-    else
-        model=$(next_model)
-    fi
+    local model="${MODEL_HEAVY_LITE}"
 
     local log_file="${LOG_DIR}/group-$(IFS=-; echo "${phases[*]}").log"
 
@@ -1252,7 +1264,7 @@ run_mode_3() {
             fi
         done
         if $use_heavy; then
-            model="${HEAVY_MODEL}"
+            model="${MODEL_HEAVY_LITE}"
         else
             model=$(next_model)
         fi
@@ -1687,7 +1699,8 @@ Options:
   --mode=3  Hybrid          — parallel groups, sequential within (default)
 
 Environment Variables:
-  HEAVY_MODEL                   Override the heavy model (default: claude-opus-4)
+  MODEL_HEAVY                   Override Mode 1 heavy model (default: claude-opus-4.6)
+  MODEL_HEAVY_LITE              Override Modes 2 & 3 heavy model (default: claude-sonnet-4.6)
   MAX_PARALLEL_AGENTS           Override max concurrent agents (default: 3)
   MAX_RETRIES_PHASE_BUILDER     Override phase-builder retries (default: 5)
   MAX_RETRIES_DTO               Override DTO guardian retries (default: 5)

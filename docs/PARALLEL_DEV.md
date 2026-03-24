@@ -26,12 +26,42 @@ Three execution modes let the operator choose the right balance for the situatio
 
 ---
 
-## 2. Mode Definitions
+## 2. Model Routing Strategy
+
+Each mode uses a different **heavy model** for its most complex phase/group, plus a shared
+round-robin **rotation pool** for all other agents.
+
+| Mode                     | Heavy Model         | Used For                               |
+| ------------------------ | ------------------- | -------------------------------------- |
+| Mode 1 (Full Parallel)   | `claude-opus-4.6`   | Heaviest phase (most complex by score) |
+| Mode 2 (Token-Optimized) | `claude-sonnet-4.6` | Single session (all phases)            |
+| Mode 3 (Hybrid)          | `claude-sonnet-4.6` | Heaviest group (by complexity score)   |
+
+**Rotation pool** (round-robin, used for all other phases and remediation agents):
+
+```
+claude-sonnet-4.6 → claude-sonnet-4.5 → gpt-5.3-codex → gpt-5.4
+```
+
+Used for: non-heavy phases, conflict-resolver, post-merge review, docs sync, quality gate
+remediation, and integration remediation.
+
+**Environment overrides:**
+
+```bash
+MODEL_HEAVY="claude-opus-4.6"         # Override Mode 1 heavy model
+MODEL_HEAVY_LITE="claude-sonnet-4.6"   # Override Modes 2 & 3 heavy model
+```
+
+---
+
+## 3. Mode Definitions
 
 ### Mode 1 — Full Parallel (Maximum Speed)
 
 Each phase runs in a **separate Git worktree** with a **dedicated Copilot CLI agent**.
-All phases execute simultaneously.
+All phases execute simultaneously. The heaviest phase (highest complexity score) gets
+`claude-opus-4.6`; all others rotate through the pool.
 
 **How it works:**
 
@@ -67,7 +97,7 @@ main
 ### Mode 2 — Token-Optimized (Serial Grouping)
 
 Multiple phases run **sequentially in a single Copilot CLI session**. No worktrees.
-Context is shared across phases.
+Context is shared across phases. Always uses `claude-sonnet-4.6` as the model.
 
 **How it works:**
 
@@ -102,7 +132,8 @@ main
 ### Mode 3 — Hybrid (Balanced) — DEFAULT
 
 Groups of phases run **in parallel across groups**, but **sequentially within each group**.
-Combines the isolation of Mode 1 with the context sharing of Mode 2.
+Combines the isolation of Mode 1 with the context sharing of Mode 2. The heaviest group
+gets `claude-sonnet-4.6`; other groups rotate through the pool.
 
 **How it works:**
 
@@ -128,7 +159,7 @@ main
 
 ---
 
-## 3. Mode Selection Strategy
+## 4. Mode Selection Strategy
 
 ```text
                         ┌─────────────────────┐
@@ -164,7 +195,7 @@ main
 
 ---
 
-## 4. Phase Grouping Rules
+## 5. Phase Grouping Rules
 
 ### Safe Parallel Combinations
 
@@ -190,7 +221,7 @@ Define your ownership matrix in `docs/implementation_roadmap.md`.
 
 ---
 
-## 5. Token Cost Optimization Strategy
+## 6. Token Cost Optimization Strategy
 
 ### Skill-First Loading
 
@@ -213,7 +244,7 @@ All agents use the skills system from `.github/skills/` instead of re-reading fu
 
 ---
 
-## 6. Resilience Framework
+## 7. Resilience Framework
 
 ### Universal Retry Pattern
 
@@ -235,6 +266,8 @@ MAX_RETRIES_MERGE=5
 MAX_RETRIES_GLOBAL_VALIDATION=5
 MAX_REMEDIATION_RETRIES=3          # quality gate remediation within pipeline
 MAX_PARALLEL_AGENTS=3              # resource control
+MODEL_HEAVY=claude-opus-4.6        # Mode 1 heavy model
+MODEL_HEAVY_LITE=claude-sonnet-4.6 # Modes 2 & 3 heavy model
 ```
 
 All retry limits are bounded. The system is **guaranteed to terminate**.
@@ -324,3 +357,14 @@ phase-builder (up to 5 retries)
 10. **Deterministic ordering** — No unordered iteration of collections without explicit sorting
 
 Gates 1–8 are **blocking** (cause failure). Gates 9–10 are **advisory**.
+
+---
+
+## 8. Requirements
+
+- **Bash 4+** — Required for associative arrays. macOS ships with bash 3.2; install via `brew install bash`
+- **Git 2.5+** — Worktree support
+- **Python 3** — Used by the YAML config parser and validation checks
+- **Copilot CLI** — For automated agent execution
+- **(Optional)** `ruff` or `flake8` — Lint checks in quality gates
+- **(Optional)** `pytest` — Test checks in quality gates

@@ -103,31 +103,48 @@ skeleton-parallel/
 | Technology-flexible    | Forbidden-by-default tech can be overridden when the project requires it |
 | Language-agnostic      | Architectural rules don’t mandate any specific programming language      |
 
-## Parallel Development Modes
+## Parallel Development System
 
-| Mode | Name             | Speed    | Cost   | Best For                                |
-| ---- | ---------------- | -------- | ------ | --------------------------------------- |
-| 1    | Full Parallel    | Fastest  | High   | Independent phases, deadline pressure   |
-| 2    | Token-Optimized  | Slowest  | Low    | Sequential dependencies, cost-sensitive |
-| 3    | Hybrid (default) | Balanced | Medium | Most development sessions               |
+The `run_parallel.sh` orchestrator runs multiple implementation phases simultaneously using
+autonomous AI agents, each with bounded retries and automatic rollback on failure.
+
+### Execution Modes
+
+| Mode | Name             | Speed    | Cost   | Heavy Model         | Best For                                |
+| ---- | ---------------- | -------- | ------ | ------------------- | --------------------------------------- |
+| 1    | Full Parallel    | Fastest  | High   | `claude-opus-4.6`   | Independent phases, deadline pressure   |
+| 2    | Token-Optimized  | Slowest  | Low    | `claude-sonnet-4.6` | Sequential dependencies, cost-sensitive |
+| 3    | Hybrid (default) | Balanced | Medium | `claude-sonnet-4.6` | Most development sessions               |
+
+All other phases rotate through: `sonnet-4.6 → sonnet-4.5 → gpt-5.3-codex → gpt-5.4`
 
 ```bash
-./scripts/run_parallel.sh start --mode=1 2 3 4    # Full parallel
-./scripts/run_parallel.sh start --mode=2 1 2 3    # Sequential
-./scripts/run_parallel.sh start --mode=3 1 2 3 4  # Hybrid (default)
+./scripts/run_parallel.sh start --mode=1 2 3 4    # Full parallel (opus for heaviest)
+./scripts/run_parallel.sh start --mode=2 1 2 3    # Sequential (sonnet only)
+./scripts/run_parallel.sh start --mode=3 1 2 3 4  # Hybrid (default, sonnet for heaviest)
+./scripts/run_parallel.sh status                   # Check progress
+./scripts/run_parallel.sh merge                    # Merge and validate
+./scripts/run_parallel.sh cleanup                  # Remove worktrees and branches
 ```
+
+### Agent Pipeline (per phase)
+
+Every phase runs through this mandatory chain — fully automated, no human intervention:
+
+```
+phase-builder (5 retries) → dto-guardian (5 retries) → integration (5 retries) → quality gates → refactor (3 retries)
+                                                                                                    ↓
+                                                                                          success OR rollback
+```
+
+### Resilience
+
+- **Checkpoint/rollback** — Git tag before each phase; auto-rollback on failure
+- **Bounded retries** — Every stage has a max retry limit; guaranteed termination
+- **Resource control** — Max 3 concurrent agents (configurable)
+- **No human intervention** — All agents run with `--no-ask-user --autopilot`
 
 ## Agent System
-
-### Pipeline Agents (automated)
-
-Every phase runs through this mandatory chain with bounded retries:
-
-```
-phase-builder (5 retries) → dto-guardian (5 retries) → integration (5 retries) → refactor (3 retries)
-```
-
-On failure: automatic rollback to Git checkpoint. No infinite loops.
 
 ### All Agents
 
@@ -179,10 +196,13 @@ Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on
 
 ## Requirements
 
-- Git 2.5+ (worktree support)
-- VS Code + GitHub Copilot
-- Runtime environment for the project’s chosen language
+- **Bash 4+** — Required for `run_parallel.sh` (macOS ships 3.2; install via `brew install bash`)
+- **Git 2.5+** — Worktree support for parallel development
+- **Python 3** — YAML config parser and validation checks
+- **VS Code + GitHub Copilot** — Agent and skill system
 - (Optional) Copilot CLI for automated parallel execution
+- (Optional) `ruff` or `flake8` for lint quality gates
+- (Optional) `pytest` for test quality gates
 
 ## License
 
