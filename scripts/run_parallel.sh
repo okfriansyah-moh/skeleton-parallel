@@ -111,6 +111,10 @@ REMEDIATION_AGENT="refactor"
 # Core skills injected into every Copilot call
 CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency"
 
+# Workspace confinement rule — injected into every agent prompt
+# Prevents agents from writing to /tmp or paths outside the project (Permission denied errors)
+_WORKSPACE_CONSTRAINT="WORKSPACE CONSTRAINT: NEVER write any files, scripts, summaries, or reports to /tmp, /var, /private, or any path outside this project directory. Write ALL output files inside the project — use .parallel-dev/ for temporary artifacts and output/ for generated files."
+
 # Protected paths — agents MUST NOT modify unless explicitly instructed
 PROTECTED_PATHS=("contracts/" "database/" "docs/")
 
@@ -554,7 +558,7 @@ phase_builder_execute() {
     cd "${work_dir}"
     local pb_log="${LOG_DIR}/${phase_label}-phase-builder-${attempt}.log"
     copilot \
-        -p "Read PHASE_TASK.md and implement all listed phases sequentially. ${skill_prompt}. MANDATORY: Use ONLY skills as primary knowledge source (${CORE_SKILLS}). DO NOT read full documentation unless skills are insufficient — if reading docs, explain why skills are insufficient. For each phase: implement, test, then commit with message 'feat(phase-N): implement <name>'. Follow all constraints in .github/copilot-instructions.md." \
+        -p "Read PHASE_TASK.md and implement all listed phases sequentially. ${skill_prompt}. MANDATORY: Use ONLY skills as primary knowledge source (${CORE_SKILLS}). DO NOT read full documentation unless skills are insufficient — if reading docs, explain why skills are insufficient. For each phase: implement, test, then commit with message 'feat(phase-N): implement <name>'. Follow all constraints in .github/copilot-instructions.md. ${_WORKSPACE_CONSTRAINT}" \
         --agent=phase-builder \
         --model="${model}" \
         --no-ask-user \
@@ -576,7 +580,7 @@ phase_builder_fix() {
     cd "${work_dir}"
     local fix_log="${LOG_DIR}/${phase_label}-phase-builder-fix-${attempt}.log"
     copilot \
-        -p "Phase builder validation failed. Fix compilation and syntax issues ONLY. Do not change architecture. ${skill_prompt}. Commit fixes." \
+        -p "Phase builder validation failed. Fix compilation and syntax issues ONLY. Do not change architecture. ${skill_prompt}. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
         --agent=refactor \
         --model="${model}" \
         --no-ask-user \
@@ -593,7 +597,7 @@ dto_guardian_execute() {
     cd "${work_dir}"
     local dg_log="${LOG_DIR}/${phase_label}-dto-guardian-${attempt}.log"
     copilot \
-        -p "Validate all DTOs in contracts/ against docs/dto_contracts.md. STRICT checks: no missing fields, no extra fields, no type mismatches, all DTOs are immutable. Use skills: dto. MANDATORY: Use ONLY skills as primary knowledge source. DO NOT read full documentation unless skills are insufficient. Report violations and fix them. Commit fixes if any." \
+        -p "Validate all DTOs in contracts/ against docs/dto_contracts.md. STRICT checks: no missing fields, no extra fields, no type mismatches, all DTOs are immutable. Use skills: dto. MANDATORY: Use ONLY skills as primary knowledge source. DO NOT read full documentation unless skills are insufficient. Report violations and fix them. Commit fixes if any. ${_WORKSPACE_CONSTRAINT}" \
         --agent=dto-guardian \
         --model="${model}" \
         --no-ask-user \
@@ -629,7 +633,7 @@ dto_guardian_fix() {
     cd "${work_dir}"
     local fix_log="${LOG_DIR}/${phase_label}-dto-fix-${attempt}.log"
     copilot \
-        -p "DTO validation failed. Fix DTO-specific issues ONLY: ensure all DTOs are immutable, no missing/extra fields, no type mismatches, no mutable defaults. Use skills: dto. Commit fixes." \
+        -p "DTO validation failed. Fix DTO-specific issues ONLY: ensure all DTOs are immutable, no missing/extra fields, no type mismatches, no mutable defaults. Use skills: dto. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
         --agent=dto-guardian \
         --model="${model}" \
         --no-ask-user \
@@ -647,7 +651,7 @@ integration_execute() {
     cd "${work_dir}"
     local int_log="${LOG_DIR}/${phase_label}-integration-${attempt}.log"
     copilot \
-        -p "Validate module integration for the phases just implemented. STRICT checklist: (1) DTO compatibility across producer/consumer stages, (2) no cross-module imports, (3) no raw SQL in modules — no database driver imports in app/modules, (4) no module calling another module, (5) database access only through orchestrator, (6) deterministic ordering preserved — all collections explicitly sorted, (7) idempotency preserved — content-addressable IDs, (8) no hidden side effects. Use skills: ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. Report and fix violations. Commit fixes if any." \
+        -p "Validate module integration for the phases just implemented. STRICT checklist: (1) DTO compatibility across producer/consumer stages, (2) no cross-module imports, (3) no raw SQL in modules — no database driver imports in app/modules, (4) no module calling another module, (5) database access only through orchestrator, (6) deterministic ordering preserved — all collections explicitly sorted, (7) idempotency preserved — content-addressable IDs, (8) no hidden side effects. Use skills: ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. Report and fix violations. Commit fixes if any. ${_WORKSPACE_CONSTRAINT}" \
         --agent=integration \
         --model="${model}" \
         --no-ask-user \
@@ -714,7 +718,7 @@ integration_fix() {
     cd "${work_dir}"
     local fix_log="${LOG_DIR}/${phase_label}-integration-fix-${attempt}.log"
     copilot \
-        -p "Integration validation failed. Fix integration-level issues: remove cross-module imports, remove DB usage from modules, remove print statements, ensure deterministic ordering (sorted collections). Use skills: ${CORE_SKILLS}. Do not change architecture. Commit fixes." \
+        -p "Integration validation failed. Fix integration-level issues: remove cross-module imports, remove DB usage from modules, remove print statements, ensure deterministic ordering (sorted collections). Use skills: ${CORE_SKILLS}. Do not change architecture. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
         --agent=refactor \
         --model="${model}" \
         --no-ask-user \
@@ -825,7 +829,7 @@ run_agent_pipeline() {
 
             local ref_log="${LOG_DIR}/${phase_label}-refactor-${qg_attempt}.log"
             copilot \
-                -p "Quality gates failed. Fix all violations: lint errors, test failures, cross-module imports, raw SQL in modules, print statements. Do not change architecture. Use skills: ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. Commit fixes." \
+                -p "Quality gates failed. Fix all violations: lint errors, test failures, cross-module imports, raw SQL in modules, print statements. Do not change architecture. Use skills: ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
                 --agent=refactor \
                 --model="${model}" \
                 --no-ask-user \
@@ -1394,9 +1398,13 @@ cmd_merge() {
         run_docs_sync "${PROJECT_ROOT}"
 
         log_header "Global Validation"
+        update_phase_status "global-validation" state "running" \
+            started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         if run_global_validation "${PROJECT_ROOT}"; then
+            update_phase_status "global-validation" state "complete" exit_code "0"
             update_state_status "passed"
         elif ! run_remediation "${PROJECT_ROOT}"; then
+            update_phase_status "global-validation" state "failed" exit_code "1"
             exit 1
         fi
 
@@ -1436,7 +1444,7 @@ cmd_merge() {
                 conflict_model=$(next_model)
 
                 copilot \
-                    -p "Merge conflict detected when merging branch ${branch} (attempt ${merge_attempt}/${MAX_RETRIES_MERGE}). Resolve ALL conflicts using the union strategy — preserve ALL code from both sides, nothing is discarded. Use skills: conflict-resolution, dto, pipeline, modularity. MANDATORY: Use ONLY skills as primary knowledge source. Resolution rules: (1) contracts/ — combine all DTO definitions, keep all DTOs (additive only); (2) app/modules/ — each module owns its directory, keep both modules' implementations; (3) tests/ — combine all test files from all phases; (4) app/orchestrator/ — later phase's wiring changes win for stage registration. Stage all resolved files (git add -A) and commit." \
+                    -p "Merge conflict detected when merging branch ${branch} (attempt ${merge_attempt}/${MAX_RETRIES_MERGE}). Resolve ALL conflicts using the union strategy — preserve ALL code from both sides, nothing is discarded. Use skills: conflict-resolution, dto, pipeline, modularity. MANDATORY: Use ONLY skills as primary knowledge source. Resolution rules: (1) contracts/ — combine all DTO definitions, keep all DTOs (additive only); (2) app/modules/ — each module owns its directory, keep both modules' implementations; (3) tests/ — combine all test files from all phases; (4) app/orchestrator/ — later phase's wiring changes win for stage registration. Stage all resolved files (git add -A) and commit. ${_WORKSPACE_CONSTRAINT}" \
                     --agent=conflict-resolver \
                     --model="${conflict_model}" \
                     --no-ask-user \
@@ -1486,9 +1494,13 @@ cmd_merge() {
     run_docs_sync "${PROJECT_ROOT}"
 
     log_header "Global Validation"
+    update_phase_status "global-validation" state "running" \
+        started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     if run_global_validation "${PROJECT_ROOT}"; then
+        update_phase_status "global-validation" state "complete" exit_code "0"
         update_state_status "passed"
     elif ! run_remediation "${PROJECT_ROOT}"; then
+        update_phase_status "global-validation" state "failed" exit_code "1"
         exit 1
     fi
 
@@ -1592,6 +1604,9 @@ run_remediation() {
     local work_dir="$1"
     local attempt=0
 
+    update_phase_status "remediation" state "running" \
+        started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
     while (( attempt < MAX_RETRIES_GLOBAL_VALIDATION )); do
         ((attempt++))
         log_info "Remediation attempt ${attempt}/${MAX_RETRIES_GLOBAL_VALIDATION}..."
@@ -1602,8 +1617,9 @@ run_remediation() {
 
         cd "${work_dir}"
         log_agent_start "refactor" "remediation" "${attempt}" "${MAX_RETRIES_GLOBAL_VALIDATION}"
+        update_phase_status "remediation" model "${model}" attempt "${attempt}"
         copilot \
-            -p "Quality gates failed. Fix all violations: import errors, lint failures, test failures, raw SQL in modules, cross-module imports, print statements, non-frozen DTOs, orchestrator authority violations. Use skills: ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. DO NOT read full documentation unless skills are insufficient. Do not change architecture. Commit fixes." \
+            -p "Quality gates failed. Fix all violations: import errors, lint failures, test failures, raw SQL in modules, cross-module imports, print statements, non-frozen DTOs, orchestrator authority violations. Use skills: ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. DO NOT read full documentation unless skills are insufficient. Do not change architecture. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
             --agent=refactor \
             --model="${model}" \
             --no-ask-user \
@@ -1614,12 +1630,14 @@ run_remediation() {
         log_agent_end "refactor" "remediation" "${ref_rc}" "${attempt}" "${MAX_RETRIES_GLOBAL_VALIDATION}"
 
         if run_global_validation "${work_dir}"; then
+            update_phase_status "remediation" state "complete" exit_code "0"
             update_state_status "passed"
             log_success "Remediation successful on attempt ${attempt}."
             return 0
         fi
     done
 
+    update_phase_status "remediation" state "failed" exit_code "1"
     log_error "Remediation failed after ${MAX_RETRIES_GLOBAL_VALIDATION} attempts. System in defined failed state."
     update_state_status "remediation_failed"
     return 1
@@ -1639,15 +1657,19 @@ run_post_merge_review() {
 
     log_header "Post-Merge Review"
 
+    update_phase_status "post-merge-review" state "running" \
+        started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
     while (( attempt < max )); do
         ((attempt++))
         local model
         model=$(next_model)
         local log_file="${LOG_DIR}/post-merge-review-${attempt}.log"
         log_agent_start "merge-reviewer" "post-merge" "${attempt}" "${max}"
+        update_phase_status "post-merge-review" model "${model}" attempt "${attempt}"
         cd "${work_dir}"
         copilot \
-            -p "Post-merge review of integration branch '${pr_branch}'. Validate the combined codebase: (1) DTO flow integrity — every stage's output DTO matches the next stage's input DTO; (2) module boundary enforcement — no cross-module imports, no DB driver usage in app/modules/; (3) orchestrator authority — all modules called only by the orchestrator, never by other modules; (4) no quality gate regressions — syntax, imports, no print statements. Use skills: dto, pipeline, modularity, idempotency, code-quality, docs-sync. MANDATORY: Use ONLY skills as primary knowledge source. Report violations and commit fixes." \
+            -p "Post-merge review of integration branch '${pr_branch}'. Validate the combined codebase: (1) DTO flow integrity — every stage's output DTO matches the next stage's input DTO; (2) module boundary enforcement — no cross-module imports, no DB driver usage in app/modules/; (3) orchestrator authority — all modules called only by the orchestrator, never by other modules; (4) no quality gate regressions — syntax, imports, no print statements. Use skills: dto, pipeline, modularity, idempotency, code-quality, docs-sync. MANDATORY: Use ONLY skills as primary knowledge source. Report violations and commit fixes. ${_WORKSPACE_CONSTRAINT}" \
             --agent=merge-reviewer \
             --model="${model}" \
             --no-ask-user \
@@ -1658,6 +1680,7 @@ run_post_merge_review() {
         log_agent_end "merge-reviewer" "post-merge" "${rc}" "${attempt}" "${max}"
 
         if (( rc == 0 )); then
+            update_phase_status "post-merge-review" state "complete" exit_code "0"
             log_success "Post-merge review passed"
             return 0
         fi
@@ -1666,6 +1689,7 @@ run_post_merge_review() {
         fi
     done
 
+    update_phase_status "post-merge-review" state "failed" exit_code "1"
     log_error "Post-merge review failed after ${max} attempts"
     return 1
 }
@@ -1679,10 +1703,12 @@ run_docs_sync() {
     local log_file="${LOG_DIR}/docs-sync.log"
 
     log_header "Documentation Sync"
+    update_phase_status "docs-sync" state "running" model "${model}" \
+        started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     log_agent_start "merge-reviewer" "docs-sync" "1" "1"
     cd "${work_dir}"
     copilot \
-        -p "Documentation sync check: verify that the implementation matches the specifications in docs/. Check for drift between docs/architecture.md, docs/dto_contracts.md, docs/orchestrator_spec.md and actual code in app/. Use skill: docs-sync. MANDATORY: docs/ is read-only — never modify documentation. If code drifts from specs, fix the code to match. Report findings and commit any code fixes." \
+        -p "Documentation sync check: verify that the implementation matches the specifications in docs/. Check for drift between docs/architecture.md, docs/dto_contracts.md, docs/orchestrator_spec.md and actual code in app/. Use skill: docs-sync. MANDATORY: docs/ is read-only — never modify documentation. If code drifts from specs, fix the code to match. Report findings and commit any code fixes. ${_WORKSPACE_CONSTRAINT}" \
         --agent=merge-reviewer \
         --model="${model}" \
         --no-ask-user \
@@ -1693,8 +1719,10 @@ run_docs_sync() {
     log_agent_end "merge-reviewer" "docs-sync" "${rc}" "1" "1"
 
     if (( rc == 0 )); then
+        update_phase_status "docs-sync" state "complete" exit_code "0"
         log_success "Documentation sync passed"
     else
+        update_phase_status "docs-sync" state "advisory_failed" exit_code "${rc}"
         log_warn "Documentation sync found issues — review ${log_file}"
         log_warn "Docs sync is advisory — pipeline continues."
     fi
@@ -1764,7 +1792,7 @@ cmd_status() {
     local phase_status_file="${PROJECT_ROOT}/.parallel-dev/phase-status.json"
 
     python3 - "${STATE_FILE}" "${phase_status_file}" <<'PYEOF'
-import json, os, sys
+import json, os, re, sys, subprocess
 
 state_path, phase_status_path = sys.argv[1], sys.argv[2]
 state = json.load(open(state_path))
@@ -1772,6 +1800,8 @@ state = json.load(open(state_path))
 mode = state["mode"]
 mode_labels = {1: "Full Parallel", 2: "Token-Optimized", 3: "Hybrid"}
 mode_label = mode_labels.get(mode, "Unknown")
+
+project_root = os.path.dirname(os.path.dirname(phase_status_path))
 
 print(f"  Mode:               {mode} ({mode_label})")
 print(f"  Phases:             {state['phases']}")
@@ -1789,22 +1819,95 @@ if pool:
     print(f"  Rotation pool:      {' → '.join(pool)}")
 print()
 
+# Load phase names from config/phases.yaml (simple regex parser)
+phase_names = {}
+phases_yaml = os.path.join(project_root, "config", "phases.yaml")
+if os.path.isfile(phases_yaml):
+    try:
+        content = open(phases_yaml).read()
+        current = None
+        for line in content.splitlines():
+            m = re.match(r'^\s{2}(\d+):\s*$', line)
+            if m:
+                current = m.group(1)
+            if current:
+                nm = re.match(r'^\s{4}name:\s*["\']?([^"\'\'#\n]+)["\']?\s*$', line)
+                if nm:
+                    phase_names[current] = nm.group(1).strip().strip('"\')
+    except Exception:
+        pass
+
+def phase_display_name(key):
+    m = re.match(r'^phase-(\d+)$', key)
+    if m and m.group(1) in phase_names:
+        return f"{key} ({phase_names[m.group(1)]})"
+    return key
+
+# Git helper
+def git(*args):
+    r = subprocess.run(["git", "-C", project_root] + list(args),
+                       capture_output=True, text=True, timeout=5)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+# Branch progress — commit count + last message per branch
+branches = state.get("branches", [])
+if branches:
+    print("  Branch Progress:")
+    for branch in branches:
+        count_str   = git("rev-list", "--count", f"main..{branch}")
+        count       = int(count_str) if count_str.isdigit() else 0
+        last_msg    = git("log", "-1", "--format=%s", branch) or "(no commits yet)"
+        count_label = "no commits yet" if count == 0 else \
+                      f"{count} commit{'s' if count != 1 else ''}"
+        branch_key  = re.sub(r'^track/', '', branch)
+        display     = phase_display_name(branch_key)
+        print(f"    {display:<44} {count_label:<16} — {last_msg}")
+    print()
+
+# Pipeline stage classification
+_PIPELINE_STAGES = ("post-merge-review", "docs-sync", "global-validation", "remediation")
+def is_pipeline_stage(key):
+    return any(key == s or key.startswith(s + "-") for s in _PIPELINE_STAGES)
+
 # Per-phase/group model and status from phase-status.json
 if os.path.isfile(phase_status_path):
     try:
         ps = json.load(open(phase_status_path))
         entries = ps.get("phases", {})
         if entries:
-            print("  Agent Status:")
-            print(f"    {'Phase/Group':<22} {'State':<12} {'Model':<28} {'Exit':<6} Updated")
-            print(f"    {'─'*22} {'─'*12} {'─'*28} {'─'*6} {'─'*20}")
-            for key in sorted(entries.keys()):
-                e = entries[key]
-                st = e.get("state", "unknown")
-                mdl = e.get("model", "N/A")
-                ec = e.get("exit_code", "—")
+            phase_entries    = {k: v for k, v in entries.items() if not is_pipeline_stage(k)}
+            pipeline_entries = {k: v for k, v in entries.items() if     is_pipeline_stage(k)}
+            W = (30, 16, 28, 6, 20)
+            header  = f"    {'Phase/Group':<{W[0]}} {'State':<{W[1]}} {'Model':<{W[2]}} {'Exit':<{W[3]}} Updated"
+            divider = f"    {'─'*W[0]} {'─'*W[1]} {'─'*W[2]} {'─'*W[3]} {'─'*W[4]}"
+
+            def fmt_row(key, e):
+                display = phase_display_name(key)
+                st  = e.get("state",      "unknown")
+                mdl = e.get("model",      "N/A")
+                ec  = str(e.get("exit_code", "—"))
                 upd = e.get("updated_at", "—")
-                print(f"    {key:<22} {st:<12} {mdl:<28} {str(ec):<6} {upd}")
+                return f"    {display:<{W[0]}} {st:<{W[1]}} {mdl:<{W[2]}} {ec:<{W[3]}} {upd}"
+
+            print("  Agent Status:")
+            print(header)
+            print(divider)
+            for key in sorted(phase_entries.keys()):
+                print(fmt_row(key, phase_entries[key]))
+            if pipeline_entries:
+                total_w = W[0] + W[1] + W[2] + W[3] + W[4] + 4
+                label   = " Post-Phase Pipeline "
+                dashes  = total_w - len(label)
+                print(f"    {'─'*(dashes//2)}{label}{'─'*(dashes - dashes//2)}")
+                shown = set()
+                for stage in _PIPELINE_STAGES:
+                    for key in sorted(pipeline_entries.keys()):
+                        if (key == stage or key.startswith(stage + "-")) and key not in shown:
+                            print(fmt_row(key, pipeline_entries[key]))
+                            shown.add(key)
+                for key in sorted(pipeline_entries.keys()):
+                    if key not in shown:
+                        print(fmt_row(key, pipeline_entries[key]))
             print()
     except Exception:
         pass
@@ -1818,7 +1921,7 @@ if os.path.isdir(log_dir):
         for log in logs:
             path = os.path.join(log_dir, log)
             size = os.path.getsize(path)
-            print(f"    {log} ({size:,} bytes)")
+            print(f"    {log} -> {path} ({size:,} bytes)")
 PYEOF
 
     echo ""

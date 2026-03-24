@@ -174,6 +174,33 @@ To opt out of auto-merge and inspect before integrating:
 - **Post-merge review** — `merge-reviewer` agent validates DTO flow, boundaries, and orchestrator authority
 - **Resource control** — Max 3 concurrent agents (configurable)
 - **No human intervention** — All agents run with `--no-ask-user --autopilot`
+- **Workspace confinement** — All agent prompts include an explicit constraint preventing writes to `/tmp` or paths outside the project; temporary artifacts go to `.parallel-dev/`, generated files to `output/`
+
+### Status Display
+
+`./scripts/run_parallel.sh status` shows a live view of the full pipeline:
+
+```
+  Branch Progress:
+    phase-2 (ingestion-scene-splitter)   2 commits   — feat(phase-2): implement ingestion
+    phase-3 (processing)                 running     — (no commits yet)
+
+  Agent Status:
+    Phase/Group                  State       Model               Exit  Updated
+    ──────────────────────────── ─────────── ─────────────────── ───── ────────────────────
+    phase-2 (ingestion...)       complete    claude-opus-4.6     0     2026-03-24T10:30:00Z
+    phase-3 (processing)         running     claude-sonnet-4.5   —     2026-03-24T10:15:00Z
+    ─────────────── Post-Phase Pipeline ─────────────────────────────────────────────────
+    post-merge-review            complete    claude-sonnet-4.6   0     2026-03-24T10:35:00Z
+    docs-sync                    advisory_failed  claude-sonnet-4.5  1  2026-03-24T10:36:00Z
+    global-validation            complete    N/A                 0     2026-03-24T10:37:00Z
+
+  Log files:
+    phase-2-phase-builder-1.log -> /path (12,345 bytes)
+    post-merge-review-1.log     -> /path (8,901 bytes)
+```
+
+Phase/group rows and post-phase pipeline stages (`post-merge-review`, `docs-sync`, `global-validation`, `remediation`) are tracked separately in `.parallel-dev/phase-status.json`.
 
 ## Agent System
 

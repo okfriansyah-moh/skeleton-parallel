@@ -290,6 +290,20 @@ MODEL_HEAVY_LITE=claude-sonnet-4.6 # Modes 2 & 3 heavy model
 
 All retry limits are bounded. The system is **guaranteed to terminate**.
 
+### Workspace Confinement
+
+All agent prompts include a `_WORKSPACE_CONSTRAINT` clause that is injected automatically:
+
+```
+WORKSPACE CONSTRAINT: NEVER write any files, scripts, summaries, or reports to
+/tmp, /var, /private, or any path outside this project directory. Write ALL output
+files inside the project — use .parallel-dev/ for temporary artifacts and output/
+for generated files.
+```
+
+This prevents `Permission denied` errors that occur when agents attempt to create
+verification scripts or summary files in `/tmp` outside the allowed workspace.
+
 ### Checkpoint & Rollback
 
 Before each phase/group, a Git tag checkpoint is created:
@@ -349,6 +363,19 @@ phase-builder (up to 5 retries)
 - **Fix:** `refactor` agent (up to 5 remediation attempts)
 - **On failure:** System enters `remediation_failed` state — operator intervention required
 
+### Post-Phase Pipeline Stages
+
+After all phase/group agents complete, the following pipeline stages run in sequence.
+Each stage is tracked in `.parallel-dev/phase-status.json` with its own state, model,
+exit code, and timestamp.
+
+| Stage               | Agent            | Function                                            | Fatal?        |
+| ------------------- | ---------------- | --------------------------------------------------- | ------------- |
+| `post-merge-review` | `merge-reviewer` | DTO flow, module boundaries, orchestrator authority | Yes           |
+| `docs-sync`         | `merge-reviewer` | Implementation drift from `docs/` specs             | No (advisory) |
+| `global-validation` | orchestrator     | Quality gates + orchestrator authority check        | Yes           |
+| `remediation`       | `refactor`       | Fix global-validation failures (up to 5 retries)    | Yes           |
+
 ### Per-Mode Recovery
 
 | Mode   | Failure Scope          | Recovery Action                                                  |
@@ -385,7 +412,64 @@ Gates 1–8 are **blocking** (cause failure). Gates 9–10 are **advisory**.
 
 ---
 
-## 8. Requirements
+## 8. Status Display
+
+Run `./scripts/run_parallel.sh status` at any time to see the live session state.
+
+### Full Status Layout
+
+```
+═══ Parallel Development Status ═══
+
+  Mode:               3 (Hybrid)
+  Phases:             2 3 4
+  Integration branch: integration/parallel-20260324-100000
+  Status:             running
+  Started:            2026-03-24T10:00:00Z
+  Branches:           track/phase-2, track/phase-3, track/phase-4
+
+  Model (heavy):      claude-sonnet-4.6
+  Rotation pool:      claude-sonnet-4.6 → claude-sonnet-4.5 → gpt-5.3-codex → gpt-5.4
+
+  Branch Progress:
+    phase-2 (ingestion-scene-splitter)           2 commits        — feat(phase-2): implement ingestion
+    phase-3 (processing)                         0 commits        — (no commits yet)
+
+  Agent Status:
+    Phase/Group                    State            Model                        Exit   Updated
+    ────────────────────────────── ──────────────── ──────────────────────────── ────── ────────────────────
+    phase-2 (ingestion-scene-spl.) complete         claude-opus-4.6              0      2026-03-24T10:30:00Z
+    phase-3 (processing)           running          claude-sonnet-4.5            —      2026-03-24T10:15:00Z
+    ──────────── Post-Phase Pipeline ────────────────────────────────────────────────────────
+    post-merge-review              complete         claude-sonnet-4.6            0      2026-03-24T10:35:00Z
+    docs-sync                      advisory_failed  claude-sonnet-4.5            1      2026-03-24T10:36:00Z
+    global-validation              complete         N/A                          0      2026-03-24T10:37:00Z
+
+  Log files:
+    phase-2-phase-builder-1.log -> /path/to/log (12,345 bytes)
+    phase-2-dto-guardian-1.log  -> /path/to/log (4,210 bytes)
+    post-merge-review-1.log     -> /path/to/log (8,901 bytes)
+    docs-sync.log               -> /path/to/log (3,102 bytes)
+```
+
+### Phase/Group State Values
+
+| State             | Meaning                                              |
+| ----------------- | ---------------------------------------------------- |
+| `running`         | Agent pipeline actively executing                    |
+| `complete`        | All stages passed; exit code 0                       |
+| `failed`          | Exceeded retry limit; rolled back to checkpoint      |
+| `timed_out`       | Per-phase timeout expired (exit code 124)            |
+| `advisory_failed` | Docs-sync advisory check reported issues (non-fatal) |
+
+### State File Location
+
+Phase status is persisted atomically to `.parallel-dev/phase-status.json`.
+The session state (mode, branches, status) is persisted to `.parallel-dev/state.json`.
+
+---
+
+## 9. Requirements
 
 - **Bash 4+** — Required for associative arrays. macOS ships with bash 3.2; install via `brew install bash`
 - **Git 2.5+** — Worktree support
@@ -398,7 +482,7 @@ Gates 1–8 are **blocking** (cause failure). Gates 9–10 are **advisory**.
 
 ---
 
-## 9. Fully Autonomous Pipeline
+## 10. Fully Autonomous Pipeline
 
 The `start` command runs the **entire pipeline** from implementation to PR without human
 intervention:
