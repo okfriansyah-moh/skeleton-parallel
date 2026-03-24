@@ -24,12 +24,45 @@
 set -euo pipefail
 
 # ── Bash version check (associative arrays require bash 4+) ──────────────
+# If running under bash < 4, attempt to find or install a modern bash and re-exec.
 if (( BASH_VERSINFO[0] < 4 )); then
-    echo "ERROR: bash 4+ required (found bash ${BASH_VERSION})."
-    echo "       macOS ships with bash 3.2 — install a newer bash:"
-    echo "         brew install bash"
-    echo "       Then re-run with: /opt/homebrew/bin/bash $0 $*"
-    exit 1
+    # Candidate paths for Homebrew-installed bash (Apple Silicon / Intel)
+    _BREW_BASH_PATHS=("/opt/homebrew/bin/bash" "/usr/local/bin/bash")
+
+    _find_modern_bash() {
+        for _p in "${_BREW_BASH_PATHS[@]}"; do
+            if [[ -x "$_p" ]] && "$_p" -c '(( BASH_VERSINFO[0] >= 4 ))' 2>/dev/null; then
+                echo "$_p"
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    _modern_bash="$(_find_modern_bash || true)"
+
+    # If no modern bash found, try to install via Homebrew
+    if [[ -z "${_modern_bash}" ]]; then
+        echo "INFO: bash 4+ required (found bash ${BASH_VERSION})."
+        if command -v brew &>/dev/null; then
+            echo "INFO: Installing modern bash via Homebrew..."
+            brew install bash
+            _modern_bash="$(_find_modern_bash || true)"
+            if [[ -z "${_modern_bash}" ]]; then
+                echo "ERROR: brew install bash succeeded but no bash 4+ found at expected paths."
+                echo "       Searched: ${_BREW_BASH_PATHS[*]}"
+                exit 1
+            fi
+        else
+            echo "ERROR: bash 4+ required and Homebrew is not installed."
+            echo "       Install Homebrew (https://brew.sh) then re-run, or install bash manually:"
+            echo "         brew install bash"
+            exit 1
+        fi
+    fi
+
+    echo "INFO: Re-executing with ${_modern_bash} (bash $("${_modern_bash}" -c 'echo ${BASH_VERSION}'))..."
+    exec "${_modern_bash}" "$0" "$@"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
