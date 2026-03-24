@@ -168,6 +168,30 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+# ─────────────────────────────────────────────────────────────
+# Skeleton Parallel — project-specific
+# ─────────────────────────────────────────────────────────────
+
+# Pipeline output
+output/
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Parallel development state
+.parallel-dev/
+PHASE_TASK.md
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
