@@ -159,6 +159,7 @@ A single `start` command runs the **entire pipeline** end-to-end without human i
 The only human step is reviewing and merging the PR.
 
 To opt out of auto-merge and inspect before integrating:
+
 ```bash
 ./scripts/run_parallel.sh start --no-auto-merge 1 2 3
 # inspect, then:
