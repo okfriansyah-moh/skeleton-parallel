@@ -76,16 +76,23 @@ main
 2. Creates a Git worktree per branch (sibling directories)
 3. Generates a `PHASE_TASK.md` instruction file in each worktree
 4. Creates **checkpoint** (`git tag checkpoint-phase-N-pre`) in each worktree
-5. Runs the **agent pipeline** per worktree with **bounded retries**:
+5. Runs `scripts/hooks/setup-env.sh` in each worktree (non-fatal if absent)
+6. Runs the **agent pipeline** per worktree with **bounded retries**:
+   - `scripts/hooks/activate-env.sh` — activates runtime env before agent
    - `phase-builder` — implements the phase (up to 5 retries)
    - `dto-guardian` — validates DTO contracts (up to 5 retries)
    - `integration` — validates module wiring (up to 5 retries)
    - `refactor` — fixes quality gate failures (up to 3 retries)
    - If any stage exceeds retry limit → rollback to checkpoint
-6. Resource control: max `MAX_PARALLEL_AGENTS` (default 3) concurrent pipelines
-7. Waits for all agent pipelines to finish
-8. Merges all branches into an integration branch (bounded merge retries)
-9. Runs global validation + creates PR
+7. Tracks per-phase status in `.parallel-dev/phase-status.json`
+8. Resource control: max `MAX_PARALLEL_AGENTS` (default 3) concurrent pipelines
+9. Waits for all agent pipelines to finish
+10. **Auto-merges** all branches into an integration branch (union strategy, bounded retries)
+    - Conflicts resolved automatically by `conflict-resolver` agent (up to 5 retries)
+11. **Post-merge review** via `merge-reviewer` agent — validates DTO flow, module boundaries, orchestrator authority
+12. **Documentation sync** via `merge-reviewer` agent — detects implementation drift from `docs/` specs (advisory)
+13. Global validation + orchestrator authority check
+14. **Creates PR automatically** via `gh pr create` (pushed to `origin`)
 
 **When to use:**
 
@@ -111,9 +118,13 @@ main
 1. Creates a single branch from `main`
 2. Generates a single `PHASE_TASK.md` with all phases listed in order
 3. Creates **checkpoint** (`git tag checkpoint-group-X-pre`)
-4. Runs the **agent pipeline** with **bounded retries**
-5. Each phase is committed before starting the next
-6. Runs global validation + creates PR
+4. Runs `scripts/hooks/activate-env.sh` (non-fatal if absent)
+5. Runs the **agent pipeline** with **bounded retries**
+6. Each phase is committed before starting the next
+7. **Post-merge review** via `merge-reviewer` agent — validates DTO flow, module boundaries, orchestrator authority
+8. **Documentation sync** via `merge-reviewer` agent (advisory)
+9. Global validation + orchestrator authority check
+10. **Creates PR automatically** via `gh pr create` (pushed to `origin`)
 
 **When to use:**
 
@@ -146,10 +157,17 @@ main
 1. Groups phases by dependency and file ownership
 2. Creates a branch + worktree per group
 3. Creates **checkpoint** per group
-4. Each group runs the **agent pipeline** with **bounded retries**
-5. Groups execute in parallel (independent worktrees)
-6. Merges all group branches into integration branch
-7. Runs global validation + creates PR
+4. Runs `scripts/hooks/setup-env.sh` in each worktree (non-fatal if absent)
+5. Each group runs the **agent pipeline** with **bounded retries**:
+   - `scripts/hooks/activate-env.sh` — activates runtime env before agent
+6. Tracks per-group status in `.parallel-dev/phase-status.json`
+7. Groups execute in parallel (independent worktrees)
+8. **Auto-merges** all group branches into integration branch (union strategy, bounded retries)
+   - Conflicts resolved automatically by `conflict-resolver` agent (up to 5 retries)
+9. **Post-merge review** via `merge-reviewer` agent — validates DTO flow, module boundaries, orchestrator authority
+10. **Documentation sync** via `merge-reviewer` agent (advisory)
+11. Global validation + orchestrator authority check
+12. **Creates PR automatically** via `gh pr create` (pushed to `origin`)
 
 **When to use:**
 
@@ -333,19 +351,26 @@ phase-builder (up to 5 retries)
 
 ### Per-Mode Recovery
 
-| Mode   | Failure Scope          | Recovery Action                                         |
-| ------ | ---------------------- | ------------------------------------------------------- |
-| Mode 1 | Single agent fails     | Rollback that phase. Other agents continue.             |
-| Mode 1 | Merge conflict         | Integration agent with bounded retry (up to 5).         |
-| Mode 2 | Agent fails mid-group  | Rollback to checkpoint. Earlier commits preserved.      |
-| Mode 2 | Context window full    | Split remaining phases into new session.                |
-| Mode 3 | Single group fails     | Rollback that group. Other groups continue.             |
-| Mode 3 | Merge conflict         | Integration agent with bounded retry.                   |
-| All    | Global validation fail | Refactor agent (up to 5). Then: defined `failed` state. |
+| Mode   | Failure Scope          | Recovery Action                                                  |
+| ------ | ---------------------- | ---------------------------------------------------------------- |
+| Mode 1 | Single agent fails     | Rollback that phase. Other agents continue.                      |
+| Mode 1 | Merge conflict         | `conflict-resolver` agent with bounded retry (up to 5).          |
+| Mode 2 | Agent fails mid-group  | Rollback to checkpoint. Earlier commits preserved.               |
+| Mode 2 | Context window full    | Split remaining phases into new session.                         |
+| Mode 3 | Single group fails     | Rollback that group. Other groups continue.                      |
+| Mode 3 | Merge conflict         | `conflict-resolver` agent with bounded retry (up to 5).          |
+| All    | Post-merge review fail | `merge-reviewer` agent retries (up to 5). Then: `review_failed`. |
+| All    | Global validation fail | `refactor` agent (up to 5). Then: defined `remediation_failed`.  |
 
 ### Quality Gate Checks (All Modes)
 
-1. **Import check** — Project compiles/imports successfully
+Quality gates are fully delegated to `scripts/hooks/quality-gates.sh`. The orchestrator
+calls this hook and treats a non-zero exit code as a gate failure. Each project provides
+its own gate implementation (Python/Node/Go/etc.)
+
+Recommended checks to implement in the hook:
+
+1. **Compile/import check** — Project compiles/imports successfully
 2. **Lint check** — No lint errors in modified files
 3. **Test check** — Test suite passes
 4. **SQL check** — No database driver imports in `app/modules/`
@@ -364,7 +389,116 @@ Gates 1–8 are **blocking** (cause failure). Gates 9–10 are **advisory**.
 
 - **Bash 4+** — Required for associative arrays. macOS ships with bash 3.2; install via `brew install bash`
 - **Git 2.5+** — Worktree support
-- **Python 3** — Used by the YAML config parser and validation checks
+- **Python 3** — Used by the YAML config parser and `update_phase_status()` (stdlib only, no packages required)
 - **Copilot CLI** — For automated agent execution
-- **(Optional)** `ruff` or `flake8` — Lint checks in quality gates
-- **(Optional)** `pytest` — Test checks in quality gates
+- **GitHub CLI (`gh`)** — For PR creation. Auto-installed if absent (Homebrew/apt/dnf). Run `gh auth login` once
+- **`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`** — Copilot auth token (checked at startup)
+- **(Optional)** `timeout` or `gtimeout` — Per-phase timeout enforcement (falls back to shell watchdog)
+- **Language-specific tools** — Belong in `scripts/hooks/`, not in `run_parallel.sh` itself
+
+---
+
+## 9. Fully Autonomous Pipeline
+
+The `start` command runs the **entire pipeline** from implementation to PR without human
+intervention:
+
+```text
+./scripts/run_parallel.sh start [--mode=1|2|3] <phases...>
+        │
+        ▼
+[1] Per phase/group: phase-builder → dto-guardian → integration → refactor
+        │  (bounded retries per stage; rollback to checkpoint on exceed)
+        ▼
+[2] Auto-merge all branches (union strategy)
+         └─ conflict-resolver agent resolves conflicts (bounded retries)
+        │
+        ▼
+[3] Post-merge review — merge-reviewer agent
+         └─ DTO flow integrity + module boundaries + orchestrator authority
+        │
+        ▼
+[4] Documentation sync — merge-reviewer agent (advisory, non-blocking)
+        │
+        ▼
+[5] Global validation — quality gates + orchestrator authority
+         └─ refactor agent remediates failures (bounded retries)
+        │
+        ▼
+[6] git push + gh pr create  ───────────────────────────►  PR ready for review
+```
+
+The only step requiring a human is reviewing and merging the PR.
+
+### Opting Out of Auto-Merge
+
+To run agents without auto-proceeding to merge and PR:
+
+```bash
+./scripts/run_parallel.sh start --no-auto-merge [--mode=1|2|3] <phases...>
+# Agents run, then stop. You can inspect before:
+./scripts/run_parallel.sh merge
+```
+
+### Partial Failure Handling
+
+If some (but not all) agents fail in Modes 1/3, auto-merge is **skipped**. You see:
+
+```
+[WARN] Some agent(s) failed — skipping auto-merge.
+[INFO] Fix failures then run: run_parallel.sh merge
+```
+
+Failed phases are rolled back to checkpoint; successful phases remain on their branches.
+
+---
+
+## 10. Hook System
+
+All language-specific operations are delegated to hook scripts under `scripts/hooks/`.
+The orchestrator (`run_parallel.sh`) **never needs project-specific modification**.
+
+### Required Hook Files
+
+| Hook file                        | When called                       | Purpose                                              |
+| -------------------------------- | --------------------------------- | ---------------------------------------------------- |
+| `scripts/hooks/setup-env.sh`     | Worktree creation (Modes 1 & 3)   | Install deps (pip install, npm ci, go mod download…) |
+| `scripts/hooks/activate-env.sh`  | Before each agent run (all modes) | Activate runtime env (.venv, nvm, …)                 |
+| `scripts/hooks/validate.sh`      | After phase-builder + after merge | Syntax/compile/import checks                         |
+| `scripts/hooks/quality-gates.sh` | Quality gates check               | Lint + tests + arch checks                           |
+
+### Hook Contract
+
+- **Missing hook** → warning logged, execution continues (non-blocking)
+- **Hook exits 0** → success
+- **Hook exits non-zero** → failure (triggers retry or rollback per stage)
+- Hooks run with `cwd` set to the worktree/project root
+- Hooks receive no arguments by default (add project-specific logic inside)
+
+### Phase Status Tracking
+
+Each phase/group writes structured status to `.parallel-dev/phase-status.json`:
+
+```json
+{
+  "phases": {
+    "phase-2": {
+      "phase": "phase-2",
+      "state": "complete",
+      "model": "claude-opus-4.6",
+      "started_at": "2026-03-24T10:00:00Z",
+      "exit_code": 0,
+      "updated_at": "2026-03-24T10:30:00Z"
+    }
+  }
+}
+```
+
+States: `running` → `complete` | `failed` | `timed_out`
+
+### Per-Phase Timeout
+
+All agent subshells are wrapped with `run_with_timeout 1800` (30 minutes default).
+A timed-out phase is recorded as `timed_out` in phase-status.json and treated as a
+failure (triggers rollback). Override by setting `AGENT_TIMEOUT_SECONDS` before calling
+the function directly.

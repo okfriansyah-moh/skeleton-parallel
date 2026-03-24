@@ -270,6 +270,167 @@ check_copilot_cli() {
     fi
 }
 
+check_copilot_auth() {
+    # Auth precedence: COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN
+    if [[ -n "${COPILOT_GITHUB_TOKEN:-}" ]]; then
+        log_success "Copilot auth: COPILOT_GITHUB_TOKEN is set"; return 0
+    fi
+    if [[ -n "${GH_TOKEN:-}" ]]; then
+        log_success "Copilot auth: GH_TOKEN is set"; return 0
+    fi
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        log_success "Copilot auth: GITHUB_TOKEN is set"; return 0
+    fi
+    log_warn "No Copilot auth token found in environment."
+    log_warn "Set COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN — or run 'copilot' interactively."
+    log_info "Proceeding anyway — agents may fail if unauthenticated."
+}
+
+install_gh_cli() {
+    # Platform-aware GitHub CLI installation (best-effort).
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if command -v brew &>/dev/null; then
+            log_info "Installing GitHub CLI via Homebrew..."
+            brew install gh; return $?
+        fi
+    elif command -v apt-get &>/dev/null; then
+        log_info "Installing GitHub CLI via apt..."
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update -qq && sudo apt install gh -y; return $?
+    elif command -v dnf &>/dev/null; then
+        log_info "Installing GitHub CLI via dnf..."
+        sudo dnf install 'dnf-command(config-manager)' -y 2>/dev/null || true
+        sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo 2>/dev/null || true
+        sudo dnf install gh -y; return $?
+    fi
+    return 1
+}
+
+check_gh_cli() {
+    # Returns 0 if gh CLI is available (installs if needed), 1 if unavailable.
+    # Non-fatal: callers degrade gracefully if this returns 1.
+    if command -v gh &>/dev/null; then
+        log_success "GitHub CLI found: $(gh --version 2>/dev/null | head -1)"
+        if ! gh auth status &>/dev/null; then
+            log_warn "GitHub CLI is not authenticated — run: gh auth login"
+            log_info "PR creation may fail without authentication."
+        fi
+        return 0
+    fi
+    log_info "GitHub CLI not found — attempting install..."
+    install_gh_cli
+    if command -v gh &>/dev/null; then
+        log_success "GitHub CLI installed: $(gh --version 2>/dev/null | head -1)"
+        return 0
+    fi
+    log_warn "GitHub CLI unavailable — PR creation will be skipped."
+    log_info "Install manually: https://cli.github.com"
+    return 1
+}
+
+run_with_timeout() {
+    # run_with_timeout SECONDS COMMAND [ARGS...]
+    # Returns command exit code, or 124 on timeout.
+    # Tries: native timeout(1) → gtimeout (Homebrew coreutils) → shell watchdog.
+    local _timeout_s="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$_timeout_s" "$@"; return $?
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$_timeout_s" "$@"; return $?
+    fi
+    # Shell watchdog fallback (macOS bash 3.2 safe)
+    "$@" &
+    local _cmd_pid=$! _elapsed=0
+    while kill -0 "$_cmd_pid" 2>/dev/null; do
+        sleep 1; _elapsed=$(( _elapsed + 1 ))
+        if [[ "$_elapsed" -ge "$_timeout_s" ]]; then
+            kill -TERM "$_cmd_pid" 2>/dev/null || true
+            local _kw=0
+            while kill -0 "$_cmd_pid" 2>/dev/null && [[ "$_kw" -lt 5 ]]; do
+                sleep 1; _kw=$(( _kw + 1 ))
+            done
+            kill -KILL "$_cmd_pid" 2>/dev/null || true
+            wait "$_cmd_pid" 2>/dev/null || true
+            return 124
+        fi
+    done
+    wait "$_cmd_pid"; return $?
+}
+
+update_phase_status() {
+    # update_phase_status PHASE KEY VALUE [KEY VALUE ...]
+    # Atomically writes fields to .parallel-dev/phase-status.json
+    local _phase="$1"; shift
+    local _status_file="${PROJECT_ROOT}/.parallel-dev/phase-status.json"
+    python3 - "$_phase" "$_status_file" "$@" <<'PYEOF'
+import sys, json, os, time
+phase, path = sys.argv[1], sys.argv[2]
+kvs = sys.argv[3:]
+data = {}
+os.makedirs(os.path.dirname(path), exist_ok=True)
+if os.path.exists(path):
+    try: data = json.load(open(path))
+    except: data = {}
+if "phases" not in data: data["phases"] = {}
+if phase not in data["phases"]: data["phases"][phase] = {"phase": phase}
+entry = data["phases"][phase]
+it = iter(kvs)
+for k in it:
+    v = next(it)
+    entry[k] = None if v == "null" else int(v) if v.lstrip("-").isdigit() else v
+entry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+tmp = path + ".tmp"
+with open(tmp, "w") as f: json.dump(data, f, indent=2)
+os.replace(tmp, path)
+PYEOF
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hook runners — language-agnostic delegation
+# The orchestrator calls these; each project provides the hook scripts.
+# Missing hook → warning + skip (non-blocking). Failing hook → returns 1.
+# ─────────────────────────────────────────────────────────────────────────────
+
+run_hook() {
+    # run_hook HOOK_NAME WORK_DIR [extra args]
+    # Looks for scripts/hooks/<hook-name>.sh relative to work_dir.
+    # Returns hook exit code, or 0 if hook is absent.
+    local hook_name="$1" work_dir="$2"
+    shift 2
+    local hook_path="${work_dir}/scripts/hooks/${hook_name}.sh"
+    if [[ ! -f "${hook_path}" ]]; then
+        log_warn "Hook not found: scripts/hooks/${hook_name}.sh — skipping"
+        return 0
+    fi
+    log_info "Running hook: scripts/hooks/${hook_name}.sh"
+    ( cd "${work_dir}" && bash "${hook_path}" "$@" )
+    return $?
+}
+
+run_env_hook() {
+    # Set up project environment (language-specific).
+    # Python: creates .venv + pip install. Node: npm ci. Go: go mod download.
+    local work_dir="${1:-${PROJECT_ROOT}}"
+    run_hook "setup-env" "${work_dir}" || true   # non-fatal
+}
+
+run_validation_hook() {
+    # Validate syntax / compile / imports (language-specific).
+    # Must exit 0 on success, non-zero on failure.
+    local work_dir="${1:-${PROJECT_ROOT}}"
+    run_hook "validate" "${work_dir}"
+}
+
+run_quality_gates_hook() {
+    # Run full quality gates: lint, tests, style, arch (language-specific).
+    # Must exit 0 when all gates pass, non-zero on any failure.
+    local work_dir="${1:-${PROJECT_ROOT}}"
+    run_hook "quality-gates" "${work_dir}"
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Agent execution logging (with retry awareness)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -406,31 +567,7 @@ phase_builder_execute() {
 phase_builder_validate() {
     local work_dir="$1"
     cd "${work_dir}"
-    local failures=0
-    # Check Python syntax across app/modules/
-    if [[ -d "app/modules" ]]; then
-        local syntax_errors
-        syntax_errors=$(find app/modules/ -name '*.py' -exec python3 -m py_compile {} \; 2>&1 | head -10)
-        if [[ -n "${syntax_errors}" ]]; then
-            log_error "[phase-builder-validate] Syntax errors found"
-            ((failures++))
-        fi
-    fi
-    # Contracts importable
-    if [[ -d "contracts" ]]; then
-        local import_errors
-        import_errors=$(find contracts/ -name '*.py' ! -name '__init__.py' -exec python3 -c "
-import importlib.util, sys
-spec = importlib.util.spec_from_file_location('m', '{}')
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
-" \; 2>&1 | head -10)
-        if [[ -n "${import_errors}" ]]; then
-            log_error "[phase-builder-validate] Contract import errors"
-            ((failures++))
-        fi
-    fi
-    return $(( failures > 0 ? 1 : 0 ))
+    run_validation_hook "${work_dir}"
 }
 
 phase_builder_fix() {
@@ -855,211 +992,20 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Quality gates
-# NOTE: These checks default to Python tooling (pytest, ruff, py_compile).
-# For other languages, adapt the lint/test/compile commands below.
+# Quality gates — delegated to scripts/hooks/quality-gates.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
 run_quality_gates() {
     local work_dir="${1:-${PROJECT_ROOT}}"
-    local failures=0
-
     log_header "Quality Gates"
-
-    cd "${work_dir}"
-
-    # 1. Import check
-    log_info "Checking imports..."
-    if [[ -f "app/__init__.py" ]] || [[ -f "app/main.py" ]]; then
-        if python3 -c "import sys; sys.path.insert(0, '.'); import app" 2>/dev/null; then
-            log_success "Import check passed"
-        else
-            log_error "Import check failed"
-            ((failures++))
-        fi
-    else
-        log_warn "Import check skipped (no app/ yet)"
-    fi
-
-    # 2. Lint check
-    log_info "Checking lint..."
-    if command -v ruff &>/dev/null; then
-        if ruff check . --quiet 2>/dev/null; then
-            log_success "Lint check passed"
-        else
-            log_error "Lint check failed"
-            ((failures++))
-        fi
-    elif command -v flake8 &>/dev/null; then
-        if flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics 2>/dev/null; then
-            log_success "Lint check passed"
-        else
-            log_error "Lint check failed"
-            ((failures++))
-        fi
-    else
-        log_warn "No linter found (install ruff or flake8)"
-    fi
-
-    # 3. Test check
-    log_info "Running tests..."
-    if [[ -d "tests" ]] && command -v pytest &>/dev/null; then
-        if pytest tests/ --tb=short -q 2>/dev/null; then
-            log_success "Tests passed"
-        else
-            log_error "Tests failed"
-            ((failures++))
-        fi
-    else
-        log_warn "No tests directory or pytest not installed"
-    fi
-
-    # 4. SQL check — no database driver imports in app/modules/
-    log_info "Checking for raw SQL in modules..."
-    if [[ -d "app/modules" ]]; then
-        if grep -rn "import sqlite3\|import psycopg2\|import asyncpg" app/modules/ 2>/dev/null; then
-            log_error "Raw database imports found in app/modules/ — must use database/adapter"
-            ((failures++))
-        else
-            log_success "No raw SQL imports in app/modules/"
-        fi
-    else
-        log_warn "No app/modules/ directory yet"
-    fi
-
-    # 5. Cross-module check
-    log_info "Checking for cross-module imports..."
-    if [[ -d "app/modules" ]]; then
-        local cross_imports
-        cross_imports=$(find app/modules/ -name '*.py' -exec grep -ln "from app\.modules\." {} \; 2>/dev/null | head -20)
-        if [[ -n "${cross_imports}" ]]; then
-            local violations=0
-            while IFS= read -r file; do
-                local file_module
-                file_module=$(echo "${file}" | sed 's|app/modules/||' | cut -d'/' -f1)
-                local imported_modules
-                imported_modules=$(grep "from app\.modules\." "${file}" | sed 's/.*from app\.modules\.\([a-z_]*\).*/\1/' | sort -u)
-                for imp in ${imported_modules}; do
-                    if [[ "${imp}" != "${file_module}" ]]; then
-                        log_error "Cross-module import: ${file} imports from app.modules.${imp}"
-                        ((violations++))
-                    fi
-                done
-            done <<< "${cross_imports}"
-            if (( violations > 0 )); then
-                ((failures++))
-            else
-                log_success "No cross-module imports"
-            fi
-        else
-            log_success "No cross-module imports"
-        fi
-    else
-        log_warn "No app/modules/ directory yet"
-    fi
-
-    # 6. Print check
-    log_info "Checking for print() statements..."
-    if [[ -d "app/modules" ]]; then
-        if grep -rn "^\s*print(" app/modules/ 2>/dev/null | grep -v "# noqa" | head -5; then
-            log_error "print() statements found in app/modules/ — use logging instead"
-            ((failures++))
-        else
-            log_success "No print() statements in app/modules/"
-        fi
-    else
-        log_warn "No app/modules/ directory yet"
-    fi
-
-    # 7. DTO validation check
-    log_info "Checking DTO contract compliance..."
-    if [[ -d "contracts" ]]; then
-        local dto_issues=0
-        if grep -rn "@dataclass$" contracts/ 2>/dev/null | grep -v "frozen=True" | head -5; then
-            log_error "Non-frozen dataclass found in contracts/"
-            ((dto_issues++))
-        fi
-        if [[ -d "app/modules" ]] && grep -rn "-> dict" app/modules/ 2>/dev/null | head -5; then
-            log_error "Module returning raw dict — must return frozen DTO from contracts/"
-            ((dto_issues++))
-        fi
-        if (( dto_issues > 0 )); then
-            ((failures++))
-        else
-            log_success "DTO contracts compliant"
-        fi
-    else
-        log_warn "No contracts/ directory yet"
-    fi
-
-    # 8. Orchestrator integrity check
-    log_info "Checking orchestrator authority..."
-    if [[ -d "app/modules" ]]; then
-        local orch_violations=0
-        if grep -rn "from database" app/modules/ 2>/dev/null | head -5; then
-            log_error "Module imports from database/ — only orchestrator may access the database"
-            ((orch_violations++))
-        fi
-        if grep -rn "import adapter" app/modules/ 2>/dev/null | head -5; then
-            log_error "Module imports adapter — only orchestrator may access the database"
-            ((orch_violations++))
-        fi
-        if (( orch_violations > 0 )); then
-            ((failures++))
-        else
-            log_success "Orchestrator authority preserved"
-        fi
-    else
-        log_warn "No app/modules/ directory yet"
-    fi
-
-    # 9. Protected files check (advisory)
-    log_info "Checking protected file integrity..."
-    if git rev-parse --is-inside-work-tree &>/dev/null; then
-        local base_branch="main"
-        if git rev-parse --verify "${base_branch}" &>/dev/null; then
-            local protected_changes
-            protected_changes=$(git diff --name-only "${base_branch}" -- contracts/ database/ docs/ 2>/dev/null || true)
-            if [[ -n "${protected_changes}" ]]; then
-                log_warn "Protected files modified (verify these changes are intentional):"
-                echo "${protected_changes}" | head -10 | while read -r f; do
-                    log_warn "  ${f}"
-                done
-            else
-                log_success "No protected files modified"
-            fi
-        fi
-    fi
-
-    # 10. Deterministic ordering check (advisory)
-    log_info "Checking deterministic ordering..."
-    if [[ -d "app/modules" ]]; then
-        local ordering_warnings=0
-        if grep -rn "for .* in .*\.keys()\|for .* in .*\.values()\|for .* in .*\.items()" app/modules/ 2>/dev/null | grep -v "sorted(" | grep -v "# noqa" | head -10 | grep -q .; then
-            log_warn "Possible non-deterministic dict iteration in app/modules/"
-            ((ordering_warnings++))
-        fi
-        if grep -rn "for .* in set(" app/modules/ 2>/dev/null | grep -v "sorted(" | grep -v "# noqa" | head -5 | grep -q .; then
-            log_warn "Iterating over set() without sorted() in app/modules/"
-            ((ordering_warnings++))
-        fi
-        if (( ordering_warnings > 0 )); then
-            log_warn "Deterministic ordering: ${ordering_warnings} warning(s) — review manually"
-        else
-            log_success "No obvious non-deterministic ordering patterns"
-        fi
-    else
-        log_warn "No app/modules/ directory yet"
-    fi
-
-    echo ""
-    if (( failures > 0 )); then
-        log_error "Quality gates: ${failures} failure(s)"
-        return 1
+    run_quality_gates_hook "${work_dir}"
+    local rc=$?
+    if (( rc != 0 )); then
+        log_error "Quality gates: FAILED (hook exit code ${rc})"
     else
         log_success "All quality gates passed"
-        return 0
     fi
+    return ${rc}
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1097,6 +1043,9 @@ run_mode_1() {
             git worktree remove "${worktree_dir}" --force 2>/dev/null || true
         fi
         git worktree add "${worktree_dir}" "${branch}"
+        log_info "  Setting up environment in worktree (Phase ${phase})..."
+        run_hook "setup-env" "${worktree_dir}" 2>&1 | tail -5 \
+            || log_warn "  setup-env hook had issues — agent will proceed"
 
         branches+=("${branch}")
     done
@@ -1146,7 +1095,19 @@ run_mode_1() {
         log_info "Launching agent pipeline for Phase ${phase} (model: ${model})..."
 
         (
+            update_phase_status "phase-${phase}" state "running" model "${model}" \
+                started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            run_hook "activate-env" "${worktree_dir}" 2>/dev/null || true
             run_agent_pipeline "${worktree_dir}" "${model}" "phase-${phase}" "${phase}"
+            local _rc=$?
+            if (( _rc == 0 )); then
+                update_phase_status "phase-${phase}" state "complete" exit_code "0"
+            elif (( _rc == 124 )); then
+                update_phase_status "phase-${phase}" state "timed_out" exit_code "124"
+            else
+                update_phase_status "phase-${phase}" state "failed" exit_code "${_rc}"
+            fi
+            exit ${_rc}
         ) &
         active_pids+=($!)
         phase_for_pid+=("${phase}")
@@ -1209,6 +1170,7 @@ run_mode_2() {
     log_info "  Log: ${log_file}"
 
     local phase_label="group-$(IFS=-; echo "${phases[*]}")"
+    run_hook "activate-env" "${PROJECT_ROOT}" 2>/dev/null || true
     run_agent_pipeline "${PROJECT_ROOT}" "${model}" "${phase_label}" "${phases[@]}"
 
     rm -f "${task_file}"
@@ -1271,6 +1233,9 @@ run_mode_3() {
             git worktree remove "${worktree_dir}" --force 2>/dev/null || true
         fi
         git worktree add "${worktree_dir}" "${branch}"
+        log_info "  Setting up environment in worktree (Group ${group})..."
+        run_hook "setup-env" "${worktree_dir}" 2>&1 | tail -5 \
+            || log_warn "  setup-env hook had issues for Group ${group}"
 
         branches+=("${branch}")
     done
@@ -1330,7 +1295,19 @@ run_mode_3() {
         log_info "Launching Group ${group} agent pipeline (model: ${model}, phases: ${group_phases[*]})..."
 
         (
+            update_phase_status "group-${phase_list}" state "running" model "${model}" \
+                started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            run_hook "activate-env" "${worktree_dir}" 2>/dev/null || true
             run_agent_pipeline "${worktree_dir}" "${model}" "group-${phase_list}" "${group_phases[@]}"
+            local _rc=$?
+            if (( _rc == 0 )); then
+                update_phase_status "group-${phase_list}" state "complete" exit_code "0"
+            elif (( _rc == 124 )); then
+                update_phase_status "group-${phase_list}" state "timed_out" exit_code "124"
+            else
+                update_phase_status "group-${phase_list}" state "failed" exit_code "${_rc}"
+            fi
+            exit ${_rc}
         ) &
         active_pids+=($!)
         group_for_pid+=("${group}")
@@ -1379,14 +1356,30 @@ cmd_merge() {
     integration_branch=$(python3 -c "import json; print(json.load(open('${STATE_FILE}'))['integration_branch'])")
 
     if (( mode == 2 )); then
-        log_info "Mode 2 — running global validation on current branch..."
+        local mode2_branch
+        mode2_branch=$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d['branches'][0])")
+        local phases_str
+        phases_str=$(python3 -c "import json; print(json.load(open('${STATE_FILE}'))['phases'])")
+
+        log_info "Mode 2 — post-pipeline validation for branch ${mode2_branch}..."
+        cd "${PROJECT_ROOT}"
+        git checkout "${mode2_branch}" 2>/dev/null || true
+
+        run_post_merge_review "${PROJECT_ROOT}" "${mode2_branch}" || {
+            update_state_status "review_failed"
+            exit 1
+        }
+        run_docs_sync "${PROJECT_ROOT}"
+
+        log_header "Global Validation"
         if run_global_validation "${PROJECT_ROOT}"; then
             update_state_status "passed"
-            log_success "Ready to create PR."
-        else
-            log_warn "Global validation failed. Running remediation..."
-            run_remediation "${PROJECT_ROOT}"
+        elif ! run_remediation "${PROJECT_ROOT}"; then
+            exit 1
         fi
+
+        create_pr "${mode2_branch}" "${phases_str}"
+        log_success "Autonomous integration complete."
         return
     fi
 
@@ -1421,8 +1414,8 @@ cmd_merge() {
                 conflict_model=$(next_model)
 
                 copilot \
-                    -p "Merge conflict detected for branch ${branch} (attempt ${merge_attempt}/${MAX_RETRIES_MERGE}). Resolve ALL conflicts by combining code from both sides (union strategy). Preserve both phases' implementations. Use skills: dto, pipeline, modularity. MANDATORY: Use ONLY skills as primary knowledge source. Rules: (1) contracts/ — combine all DTO definitions, (2) app/modules/ — each module owns its directory, no overlap, (3) tests/ — combine all test files, (4) app/orchestrator/ — later phase wins for wiring changes. Stage resolved files and commit." \
-                    --agent=integration \
+                    -p "Merge conflict detected when merging branch ${branch} (attempt ${merge_attempt}/${MAX_RETRIES_MERGE}). Resolve ALL conflicts using the union strategy — preserve ALL code from both sides, nothing is discarded. Use skills: conflict-resolution, dto, pipeline, modularity. MANDATORY: Use ONLY skills as primary knowledge source. Resolution rules: (1) contracts/ — combine all DTO definitions, keep all DTOs (additive only); (2) app/modules/ — each module owns its directory, keep both modules' implementations; (3) tests/ — combine all test files from all phases; (4) app/orchestrator/ — later phase's wiring changes win for stage registration. Stage all resolved files (git add -A) and commit." \
+                    --agent=conflict-resolver \
                     --model="${conflict_model}" \
                     --no-ask-user \
                     --allow-all-tools \
@@ -1464,15 +1457,23 @@ cmd_merge() {
         exit 1
     fi
 
+    run_post_merge_review "${PROJECT_ROOT}" "${integration_branch}" || {
+        update_state_status "review_failed"
+        exit 1
+    }
+    run_docs_sync "${PROJECT_ROOT}"
+
     log_header "Global Validation"
     if run_global_validation "${PROJECT_ROOT}"; then
         update_state_status "passed"
-        log_success "[global-validation] passed"
-        log_success "Integration complete. Push with: git push origin ${integration_branch}"
-    else
-        log_warn "[global-validation] failed. Running remediation..."
-        run_remediation "${PROJECT_ROOT}"
+    elif ! run_remediation "${PROJECT_ROOT}"; then
+        exit 1
     fi
+
+    local phases_str
+    phases_str=$(python3 -c "import json; print(json.load(open('${STATE_FILE}'))['phases'])")
+    create_pr "${integration_branch}" "${phases_str}"
+    log_success "Autonomous integration complete."
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1484,18 +1485,25 @@ validate_merge() {
     local failures=0
     cd "${work_dir}"
 
-    if grep -rn "^<<<<<<<\|^>>>>>>>\|^=======$" --include='*.py' --include='*.md' . 2>/dev/null | head -5 | grep -q .; then
-        log_error "[merge-validate] Conflict markers found in files"
+    # Git-tracked unresolved conflicts (language-agnostic)
+    if git diff --name-only --diff-filter=U 2>/dev/null | head -1 | grep -q .; then
+        log_error "[merge-validate] Unresolved git conflicts:"
+        git diff --name-only --diff-filter=U 2>/dev/null | while read -r f; do log_error "  ${f}"; done
         ((failures++))
     fi
 
-    if [[ -d "app/modules" ]]; then
-        local syntax_errors
-        syntax_errors=$(find app/modules/ contracts/ -name '*.py' -exec python3 -m py_compile {} \; 2>&1 | head -10)
-        if [[ -n "${syntax_errors}" ]]; then
-            log_error "[merge-validate] Compilation failed after merge"
-            ((failures++))
-        fi
+    # Conflict markers in tracked text files (language-agnostic via git grep)
+    if git grep -l "^<<<<<<< \|^>>>>>>> " -- ':!*.png' ':!*.jpg' ':!*.gif' ':!*.ico' ':!*.bin' 2>/dev/null \
+            | head -5 | grep -q .; then
+        log_error "[merge-validate] Conflict markers found in:"
+        git grep -l "^<<<<<<< \|^>>>>>>> " -- ':!*.png' ':!*.jpg' ':!*.gif' ':!*.ico' ':!*.bin' 2>/dev/null \
+            | while read -r f; do log_error "  ${f}"; done
+        ((failures++))
+    fi
+
+    if ! run_validation_hook "${work_dir}"; then
+        log_error "[merge-validate] Validation hook failed after merge"
+        ((failures++))
     fi
 
     return $(( failures > 0 ? 1 : 0 ))
@@ -1514,32 +1522,8 @@ run_global_validation() {
         ((failures++))
     fi
 
-    # DTO flow integrity
-    if [[ -d "contracts" ]] && [[ -d "app/modules" ]]; then
-        log_info "[global] Validating DTO flow across all modules..."
-        local dto_flow_errors
-        dto_flow_errors=$(python3 -c "
-import importlib, sys, os
-sys.path.insert(0, '.')
-errors = []
-for f in sorted(os.listdir('contracts')):
-    if f.endswith('.py') and f != '__init__.py':
-        mod = f[:-3]
-        try:
-            importlib.import_module(f'contracts.{mod}')
-        except Exception as e:
-            errors.append(f'contracts.{mod}: {e}')
-for e in errors:
-    print(e)
-" 2>&1)
-        if [[ -n "${dto_flow_errors}" ]]; then
-            log_error "[global] DTO flow integrity errors:"
-            echo "${dto_flow_errors}" | head -10
-            ((failures++))
-        else
-            log_success "[global] DTO flow integrity passed"
-        fi
-    fi
+    # Project-level semantic validation (language-specific)
+    run_validation_hook "${work_dir}" || ((failures++))
 
     # Orchestrator authority — comprehensive
     if [[ -d "app/modules" ]]; then
@@ -1617,6 +1601,130 @@ run_remediation() {
     log_error "Remediation failed after ${MAX_RETRIES_GLOBAL_VALIDATION} attempts. System in defined failed state."
     update_state_status "remediation_failed"
     return 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-merge pipeline: review, docs sync, PR creation
+# ─────────────────────────────────────────────────────────────────────────────
+
+run_post_merge_review() {
+    # run_post_merge_review WORK_DIR PR_BRANCH
+    # Runs merge-reviewer agent to validate the integration branch.
+    # Bounded by MAX_RETRIES_GLOBAL_VALIDATION. Returns 0 on success, 1 on failure.
+    local work_dir="$1" pr_branch="$2"
+    local attempt=0
+    local max="${MAX_RETRIES_GLOBAL_VALIDATION}"
+
+    log_header "Post-Merge Review"
+
+    while (( attempt < max )); do
+        ((attempt++))
+        local model
+        model=$(next_model)
+        local log_file="${LOG_DIR}/post-merge-review-${attempt}.log"
+        log_agent_start "merge-reviewer" "post-merge" "${attempt}" "${max}"
+        cd "${work_dir}"
+        copilot \
+            -p "Post-merge review of integration branch '${pr_branch}'. Validate the combined codebase: (1) DTO flow integrity — every stage's output DTO matches the next stage's input DTO; (2) module boundary enforcement — no cross-module imports, no DB driver usage in app/modules/; (3) orchestrator authority — all modules called only by the orchestrator, never by other modules; (4) no quality gate regressions — syntax, imports, no print statements. Use skills: dto, pipeline, modularity, idempotency, code-quality, docs-sync. MANDATORY: Use ONLY skills as primary knowledge source. Report violations and commit fixes." \
+            --agent=merge-reviewer \
+            --model="${model}" \
+            --no-ask-user \
+            --allow-all-tools \
+            --autopilot \
+            2>&1 | tee "${log_file}"
+        local rc=${PIPESTATUS[0]}
+        log_agent_end "merge-reviewer" "post-merge" "${rc}" "${attempt}" "${max}"
+
+        if (( rc == 0 )); then
+            log_success "Post-merge review passed"
+            return 0
+        fi
+        if (( attempt < max )); then
+            log_warn "[post-merge-review] attempt ${attempt} failed — retrying"
+        fi
+    done
+
+    log_error "Post-merge review failed after ${max} attempts"
+    return 1
+}
+
+run_docs_sync() {
+    # run_docs_sync WORK_DIR
+    # Advisory docs-sync check via merge-reviewer agent. Always returns 0 (non-fatal).
+    local work_dir="$1"
+    local model
+    model=$(next_model)
+    local log_file="${LOG_DIR}/docs-sync.log"
+
+    log_header "Documentation Sync"
+    log_agent_start "merge-reviewer" "docs-sync" "1" "1"
+    cd "${work_dir}"
+    copilot \
+        -p "Documentation sync check: verify that the implementation matches the specifications in docs/. Check for drift between docs/architecture.md, docs/dto_contracts.md, docs/orchestrator_spec.md and actual code in app/. Use skill: docs-sync. MANDATORY: docs/ is read-only — never modify documentation. If code drifts from specs, fix the code to match. Report findings and commit any code fixes." \
+        --agent=merge-reviewer \
+        --model="${model}" \
+        --no-ask-user \
+        --allow-all-tools \
+        --autopilot \
+        2>&1 | tee "${log_file}"
+    local rc=${PIPESTATUS[0]}
+    log_agent_end "merge-reviewer" "docs-sync" "${rc}" "1" "1"
+
+    if (( rc == 0 )); then
+        log_success "Documentation sync passed"
+    else
+        log_warn "Documentation sync found issues — review ${log_file}"
+        log_warn "Docs sync is advisory — pipeline continues."
+    fi
+    return 0  # always non-fatal
+}
+
+create_pr() {
+    # create_pr PR_BRANCH PHASES_STR
+    # Pushes the integration branch and creates a GitHub PR via gh CLI.
+    local pr_branch="$1" phases_str="$2"
+    log_header "Publishing Integration"
+
+    log_info "Pushing ${pr_branch}..."
+    if ! git push --set-upstream origin "${pr_branch}" 2>&1; then
+        log_error "Push failed. Proceed manually:"
+        log_info "  git push origin ${pr_branch}"
+        log_info "  gh pr create --title 'feat: parallel phases ${phases_str}' --base main --head ${pr_branch}"
+        return 1
+    fi
+    log_success "Branch pushed: ${pr_branch}"
+
+    if ! check_gh_cli; then
+        log_warn "GitHub CLI unavailable — PR not created."
+        log_info "Manual PR: gh pr create --title 'feat: parallel phases ${phases_str}' --base main --head ${pr_branch}"
+        return 0
+    fi
+
+    local pr_title="feat: parallel development — phases ${phases_str}"
+    log_info "Creating pull request..."
+    if gh pr create \
+        --title "${pr_title}" \
+        --body "## Parallel Development Integration
+
+**Phases:** ${phases_str}
+**Branch:** \`${pr_branch}\`
+
+### Automated Validation Pipeline
+- ✅ Phase builder → DTO guardian → integration agent (per phase/group)
+- ✅ Union merge with conflict-resolver agent (bounded retries)
+- ✅ Post-merge review (merge-reviewer agent)
+- ✅ Documentation sync check
+- ✅ Global validation + orchestrator authority check
+
+*Auto-generated by \`run_parallel.sh\`*" \
+        --base main \
+        --head "${pr_branch}" 2>&1; then
+        log_success "Pull request created!"
+    else
+        log_warn "PR creation failed — branch is pushed. Create PR manually:"
+        log_info "  gh pr create --title '${pr_title}' --base main --head ${pr_branch}"
+    fi
+    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1727,9 +1835,10 @@ Commands:
   gates     Run quality gates without launching agents
 
 Options:
-  --mode=1  Full Parallel   — one agent per phase (max speed)
-  --mode=2  Token-Optimized — single session, sequential (min cost)
-  --mode=3  Hybrid          — parallel groups, sequential within (default)
+  --mode=1        Full Parallel   — one agent per phase (max speed)
+  --mode=2        Token-Optimized — single session, sequential (min cost)
+  --mode=3        Hybrid          — parallel groups, sequential within (default)
+  --no-auto-merge Skip auto-merge/PR after agents complete (manual merge step)
 
 Environment Variables:
   MODEL_HEAVY                   Override Mode 1 heavy model (default: claude-opus-4.6)
@@ -1769,6 +1878,7 @@ main() {
     case "${command}" in
         start)
             local phases=()
+            local AUTO_MERGE=true
             while (( $# > 0 )); do
                 case "$1" in
                     --mode=*)
@@ -1777,6 +1887,9 @@ main() {
                             log_error "Invalid mode: ${MODE}. Must be 1, 2, or 3."
                             exit 1
                         fi
+                        ;;
+                    --no-auto-merge)
+                        AUTO_MERGE=false
                         ;;
                     -*)
                         log_error "Unknown option: $1"
@@ -1796,6 +1909,8 @@ main() {
 
             validate_phases "${phases[@]}"
             check_copilot_cli
+            check_copilot_auth
+            run_env_hook "${PROJECT_ROOT}"
 
             log_info "Mode: ${MODE} | Phases: ${phases[*]}"
 
@@ -1804,6 +1919,20 @@ main() {
                 2) run_mode_2 "${phases[@]}" ;;
                 3) run_mode_3 "${phases[@]}" ;;
             esac
+
+            # Autonomous pipeline: auto-merge + PR when all agents complete
+            if $AUTO_MERGE; then
+                local _state_status
+                _state_status=$(python3 -c "import json; print(json.load(open('${STATE_FILE}'))['status'])" 2>/dev/null || echo "unknown")
+                if [[ "${_state_status}" == "agents_complete" ]]; then
+                    log_header "Auto-Merge — Fully Autonomous Pipeline"
+                    log_info "All agents completed — proceeding to merge and PR creation..."
+                    cmd_merge
+                elif [[ "${_state_status}" == "partial_failure" ]]; then
+                    log_warn "Some agent(s) failed — skipping auto-merge."
+                    log_info "Fix failures then run: $(basename "$0") merge"
+                fi
+            fi
             ;;
         status)
             cmd_status
@@ -1815,6 +1944,7 @@ main() {
             cmd_cleanup
             ;;
         gates)
+            run_env_hook "${PROJECT_ROOT}"
             run_quality_gates "${PROJECT_ROOT}"
             ;;
         *)

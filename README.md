@@ -12,6 +12,7 @@ A **production-grade project skeleton** that provides:
 
 - **AI-assisted development framework** — 9 agents, 13 skills, and 5 prompts for GitHub Copilot
 - **3-mode parallel development system** — Full parallel, token-optimized, and hybrid execution
+- **Fully autonomous pipeline** — One command runs agents → union merge → review → PR creation
 - **Deterministic pipeline architecture** — Same input + same config = identical output
 - **Database-agnostic design** — Choose any engine; modules never touch SQL directly
 - **Self-healing retry system** — Bounded retries with checkpoint/rollback at every stage
@@ -39,8 +40,9 @@ cd my-project && git remote remove origin
 # 5. Implement Phase 0 (infrastructure)
 @phase-builder implement Phase 0
 
-# 6. Run parallel development
+# 6. Run parallel development — fully autonomous (agents → merge → PR)
 ./scripts/run_parallel.sh start --mode=3 1 2 3 4
+# A pull request is created automatically when all phases pass.
 ```
 
 See [docs/STARTER_GUIDE.md](docs/STARTER_GUIDE.md) for the full walkthrough.
@@ -119,28 +121,56 @@ autonomous AI agents, each with bounded retries and automatic rollback on failur
 All other phases rotate through: `sonnet-4.6 → sonnet-4.5 → gpt-5.3-codex → gpt-5.4`
 
 ```bash
-./scripts/run_parallel.sh start --mode=1 2 3 4    # Full parallel (opus for heaviest)
-./scripts/run_parallel.sh start --mode=2 1 2 3    # Sequential (sonnet only)
-./scripts/run_parallel.sh start --mode=3 1 2 3 4  # Hybrid (default, sonnet for heaviest)
-./scripts/run_parallel.sh status                   # Check progress
-./scripts/run_parallel.sh merge                    # Merge and validate
-./scripts/run_parallel.sh cleanup                  # Remove worktrees and branches
+./scripts/run_parallel.sh start --mode=1 2 3 4           # Full parallel (opus for heaviest)
+./scripts/run_parallel.sh start --mode=2 1 2 3           # Sequential (sonnet only)
+./scripts/run_parallel.sh start --mode=3 1 2 3 4         # Hybrid (default, sonnet for heaviest)
+./scripts/run_parallel.sh start --no-auto-merge 1 2 3    # Run agents only, skip auto-merge
+./scripts/run_parallel.sh status                         # Check progress
+./scripts/run_parallel.sh merge                          # Merge, validate, and create PR manually
+./scripts/run_parallel.sh cleanup                        # Remove worktrees and branches
 ```
 
-### Agent Pipeline (per phase)
+### Fully Autonomous Pipeline
 
-Every phase runs through this mandatory chain — fully automated, no human intervention:
+A single `start` command runs the **entire pipeline** end-to-end without human intervention:
 
 ```
-phase-builder (5 retries) → dto-guardian (5 retries) → integration (5 retries) → quality gates → refactor (3 retries)
-                                                                                                    ↓
-                                                                                          success OR rollback
+./scripts/run_parallel.sh start <phases>
+         │
+         ▼
+[1] Per phase/group: phase-builder → dto-guardian → integration → refactor
+         │  (bounded retries per stage; auto-rollback to checkpoint on exceed)
+         ▼
+[2] Union merge — conflict-resolver agent resolves all conflicts (5 retries)
+         │  (preserves ALL implementations from every phase)
+         ▼
+[3] Post-merge review — merge-reviewer agent
+         │  (DTO flow integrity · module boundaries · orchestrator authority)
+         ▼
+[4] Documentation sync — merge-reviewer agent  [advisory, non-blocking]
+         │
+         ▼
+[5] Global validation + orchestrator authority check
+         │  (refactor agent remediates if needed, up to 5 retries)
+         ▼
+[6] git push + gh pr create ──────────────────────────────► PR ready for review
+```
+
+The only human step is reviewing and merging the PR.
+
+To opt out of auto-merge and inspect before integrating:
+```bash
+./scripts/run_parallel.sh start --no-auto-merge 1 2 3
+# inspect, then:
+./scripts/run_parallel.sh merge
 ```
 
 ### Resilience
 
 - **Checkpoint/rollback** — Git tag before each phase; auto-rollback on failure
 - **Bounded retries** — Every stage has a max retry limit; guaranteed termination
+- **Union merge** — `conflict-resolver` agent combines all implementations; nothing is discarded
+- **Post-merge review** — `merge-reviewer` agent validates DTO flow, boundaries, and orchestrator authority
 - **Resource control** — Max 3 concurrent agents (configurable)
 - **No human intervention** — All agents run with `--no-ask-user --autopilot`
 
@@ -200,9 +230,9 @@ Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on
 - **Git 2.5+** — Worktree support for parallel development
 - **Python 3** — YAML config parser and validation checks
 - **VS Code + GitHub Copilot** — Agent and skill system
+- **GitHub CLI (`gh`)** — PR creation (auto-installed if absent; run `gh auth login` once)
 - (Optional) Copilot CLI for automated parallel execution
-- (Optional) `ruff` or `flake8` for lint quality gates
-- (Optional) `pytest` for test quality gates
+- (Optional) Language-specific lint/test tools — place in `scripts/hooks/quality-gates.sh`
 
 ## License
 
