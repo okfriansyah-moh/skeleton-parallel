@@ -186,4 +186,4 @@ Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on
 
 ## License
 
-MIT
+Apache-2.0. See [LICENSE](LICENSE).
