@@ -475,9 +475,33 @@ The orchestrator (`run_parallel.sh`) **never needs project-specific modification
 - Hooks run with `cwd` set to the worktree/project root
 - Hooks receive no arguments by default (add project-specific logic inside)
 
+### Session State
+
+The orchestrator persists session-level state to `.parallel-dev/state.json`, including
+model routing information for visibility:
+
+```json
+{
+  "mode": 1,
+  "phases": "2 3 4",
+  "integration_branch": "integration/parallel-20260324-100000",
+  "branches": ["track/phase-2", "track/phase-3", "track/phase-4"],
+  "started_at": "2026-03-24T10:00:00Z",
+  "status": "running",
+  "model_heavy": "claude-opus-4.6",
+  "model_rotation_pool": [
+    "claude-sonnet-4.6",
+    "claude-sonnet-4.5",
+    "gpt-5.3-codex",
+    "gpt-5.4"
+  ]
+}
+```
+
 ### Phase Status Tracking
 
-Each phase/group writes structured status to `.parallel-dev/phase-status.json`:
+Each phase/group writes structured status to `.parallel-dev/phase-status.json`,
+including which model the agent is using:
 
 ```json
 {
@@ -489,12 +513,49 @@ Each phase/group writes structured status to `.parallel-dev/phase-status.json`:
       "started_at": "2026-03-24T10:00:00Z",
       "exit_code": 0,
       "updated_at": "2026-03-24T10:30:00Z"
+    },
+    "phase-3": {
+      "phase": "phase-3",
+      "state": "running",
+      "model": "claude-sonnet-4.5",
+      "started_at": "2026-03-24T10:01:00Z",
+      "updated_at": "2026-03-24T10:15:00Z"
     }
   }
 }
 ```
 
 States: `running` → `complete` | `failed` | `timed_out`
+
+### Status Command Output
+
+`./scripts/run_parallel.sh status` displays session info, model routing, and per-phase
+agent status:
+
+```text
+═══ Parallel Development Status ═══
+
+  Mode:               1 (Full Parallel)
+  Phases:             2 3 4
+  Integration branch: integration/parallel-20260324-100000
+  Status:             running
+  Started:            2026-03-24T10:00:00Z
+  Branches:           track/phase-2, track/phase-3, track/phase-4
+
+  Model (heavy):      claude-opus-4.6
+  Rotation pool:      claude-sonnet-4.6 → claude-sonnet-4.5 → gpt-5.3-codex → gpt-5.4
+
+  Agent Status:
+    Phase/Group            State        Model                        Exit   Updated
+    ────────────────────── ──────────── ──────────────────────────── ────── ────────────────────
+    phase-2                complete     claude-opus-4.6              0      2026-03-24T10:30:00Z
+    phase-3                running      claude-sonnet-4.5            —      2026-03-24T10:15:00Z
+    phase-4                running      gpt-5.3-codex               —      2026-03-24T10:02:00Z
+
+  Log files:
+    phase-2.log (12,345 bytes)
+    phase-3.log (8,901 bytes)
+```
 
 ### Per-Phase Timeout
 

@@ -871,6 +871,16 @@ save_state() {
     done
     branches_json+="]"
 
+    # Determine model routing for this mode
+    local heavy_model rotation_pool_str
+    if (( mode == 1 )); then
+        heavy_model="${MODEL_HEAVY}"
+    else
+        heavy_model="${MODEL_HEAVY_LITE}"
+    fi
+    rotation_pool_str=$(printf ',"%s"' "${MODEL_ROTATE_POOL[@]}")
+    rotation_pool_str="[${rotation_pool_str:1}]"
+
     cat > "${STATE_FILE}" <<EOF
 {
     "mode": ${mode},
@@ -878,7 +888,9 @@ save_state() {
     "integration_branch": "${integration_branch}",
     "branches": ${branches_json},
     "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-    "status": "running"
+    "status": "running",
+    "model_heavy": "${heavy_model}",
+    "model_rotation_pool": ${rotation_pool_str}
 }
 EOF
 }
@@ -1170,8 +1182,18 @@ run_mode_2() {
     log_info "  Log: ${log_file}"
 
     local phase_label="group-$(IFS=-; echo "${phases[*]}")"
+    update_phase_status "${phase_label}" state "running" model "${model}" \
+        started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     run_hook "activate-env" "${PROJECT_ROOT}" 2>/dev/null || true
     run_agent_pipeline "${PROJECT_ROOT}" "${model}" "${phase_label}" "${phases[@]}"
+    local _rc=$?
+    if (( _rc == 0 )); then
+        update_phase_status "${phase_label}" state "complete" exit_code "0"
+    elif (( _rc == 124 )); then
+        update_phase_status "${phase_label}" state "timed_out" exit_code "124"
+    else
+        update_phase_status "${phase_label}" state "failed" exit_code "${_rc}"
+    fi
 
     rm -f "${task_file}"
 
@@ -1739,11 +1761,19 @@ cmd_status() {
         return
     fi
 
-    python3 <<PYEOF
-import json, os
+    local phase_status_file="${PROJECT_ROOT}/.parallel-dev/phase-status.json"
 
-state = json.load(open("${STATE_FILE}"))
-print(f"  Mode:               {state['mode']}")
+    python3 - "${STATE_FILE}" "${phase_status_file}" <<'PYEOF'
+import json, os, sys
+
+state_path, phase_status_path = sys.argv[1], sys.argv[2]
+state = json.load(open(state_path))
+
+mode = state["mode"]
+mode_labels = {1: "Full Parallel", 2: "Token-Optimized", 3: "Hybrid"}
+mode_label = mode_labels.get(mode, "Unknown")
+
+print(f"  Mode:               {mode} ({mode_label})")
 print(f"  Phases:             {state['phases']}")
 print(f"  Integration branch: {state['integration_branch']}")
 print(f"  Status:             {state['status']}")
@@ -1751,7 +1781,36 @@ print(f"  Started:            {state['started_at']}")
 print(f"  Branches:           {', '.join(state['branches'])}")
 print()
 
-log_dir = "${LOG_DIR}"
+# Model routing
+heavy = state.get("model_heavy", "N/A")
+pool = state.get("model_rotation_pool", [])
+print(f"  Model (heavy):      {heavy}")
+if pool:
+    print(f"  Rotation pool:      {' → '.join(pool)}")
+print()
+
+# Per-phase/group model and status from phase-status.json
+if os.path.isfile(phase_status_path):
+    try:
+        ps = json.load(open(phase_status_path))
+        entries = ps.get("phases", {})
+        if entries:
+            print("  Agent Status:")
+            print(f"    {'Phase/Group':<22} {'State':<12} {'Model':<28} {'Exit':<6} Updated")
+            print(f"    {'─'*22} {'─'*12} {'─'*28} {'─'*6} {'─'*20}")
+            for key in sorted(entries.keys()):
+                e = entries[key]
+                st = e.get("state", "unknown")
+                mdl = e.get("model", "N/A")
+                ec = e.get("exit_code", "—")
+                upd = e.get("updated_at", "—")
+                print(f"    {key:<22} {st:<12} {mdl:<28} {str(ec):<6} {upd}")
+            print()
+    except Exception:
+        pass
+
+# Log files
+log_dir = os.path.join(os.path.dirname(phase_status_path), "logs")
 if os.path.isdir(log_dir):
     logs = sorted(os.listdir(log_dir))
     if logs:
