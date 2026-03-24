@@ -6,7 +6,7 @@
 
 ## 1. Prerequisites
 
-- **Python 3.10+** installed
+- **Runtime environment** for the project’s chosen language installed
 - **Git** with worktree support (Git 2.5+)
 - **VS Code** with GitHub Copilot extension
 - (Optional) **Copilot CLI** for automated parallel execution
@@ -133,11 +133,11 @@ skeleton-parallel/
 │       ├── database-portability/SKILL.md
 │       └── running-prompt/SKILL.md
 ├── docs/                          # Architecture + specs (templates)
-├── contracts/                     # DTO definitions (frozen dataclasses)
+├── contracts/                     # Immutable DTO definitions
 ├── database/                      # DB adapter + migrations
 ├── config/                        # YAML configuration
 ├── app/                           # Application code
-│   ├── main.py                    # Entry point
+│   ├── main.*                     # Entry point (language-specific)
 │   ├── modules/                   # One package per pipeline stage
 │   └── orchestrator/              # Pipeline orchestration
 ├── tests/                         # Unit + integration tests

@@ -9,7 +9,7 @@
 
 <!-- Replace with your system's one-paragraph description -->
 
-This system is a **deterministic, modular monolith pipeline** that processes [INPUT] through a sequence of staged transformations to produce [OUTPUT]. It runs as a single Python 3.10+ process with a database-backed state layer, enforcing strict idempotency and content-addressable identifiers throughout. The database engine is project-specific — see `docs/db_adapter_spec.md`.
+This system is a **deterministic, modular monolith pipeline** that processes [INPUT] through a sequence of staged transformations to produce [OUTPUT]. It runs as a single process with a database-backed state layer, enforcing strict idempotency and content-addressable identifiers throughout. The database engine is project-specific — see `docs/db_adapter_spec.md`.
 
 ---
 
@@ -40,11 +40,9 @@ One module per pipeline stage, located under `app/modules/`:
 ```
 app/modules/
 ├── stage_1/
-│   ├── __init__.py      # exports: process(input, config) -> Stage1Result
-│   └── stage_1.py       # core implementation
+│   └── ...              # exports: process(input, config) -> Stage1Result
 ├── stage_2/
-│   ├── __init__.py
-│   └── stage_2.py
+│   └── ...
 ├── ...
 ```
 

@@ -1,9 +1,3 @@
----
-mode: "agent"
-description: "Generate the system architecture document (docs/architecture.md) for a new project using the skeleton-parallel framework."
-tools: ["read", "edit", "search"]
----
-
 # Architecture Generation Prompt
 
 You are a Staff+ backend architect. Generate a complete `docs/architecture.md` for a new project based on the skeleton-parallel framework.
@@ -84,7 +78,7 @@ Define thresholds, retry policies, and degradation strategies.
 - Enforce determinism — same input = same output
 - Enforce idempotency — content-addressable IDs, ON CONFLICT DO NOTHING
 - Enforce orchestrator authority — only orchestrator calls modules
-- Enforce database adapter — all DB access through `database/adapter.py`
+- Enforce database adapter — all DB access through `database/adapter.*`
 
 ## Output
 

@@ -15,12 +15,11 @@ tools:
     search/codebase,
     agent/runSubagent,
   ]
-model: claude-sonnet-4
 ---
 
 ## Role
 
-You are an elite Staff+ Software Architect and Python Developer implementing a **deterministic, modular monolith pipeline** using the skeleton-parallel framework.
+You are an elite Staff+ Software Architect and Developer implementing a **deterministic, modular monolith pipeline** using the skeleton-parallel framework.
 
 ## Skills Used
 
@@ -31,7 +30,7 @@ You are an elite Staff+ Software Architect and Python Developer implementing a *
 - `.github/skills/idempotency/SKILL.md` — content-addressable IDs, ON CONFLICT DO NOTHING
 - `.github/skills/failure/SKILL.md` — retry, abort, degradation
 - `.github/skills/config-validation/SKILL.md` — config-driven parameters
-- `.github/skills/code-quality/SKILL.md` — type hints, logging, Python standards
+- `.github/skills/code-quality/SKILL.md` — type annotations, logging, code standards
 - `.github/skills/database-portability/SKILL.md` — portable SQL and adapter rules
 - `.github/skills/token-optimization/SKILL.md` — efficient context loading
 
@@ -104,17 +103,17 @@ If the user does NOT say "parallel mode", implement normally but still respect m
 ## Constraints (Non-Negotiable)
 
 1. **Only implement work belonging to the target phase** — no stubs for future phases
-2. **Modular Monolith** — all code in `app/modules/`, single Python 3.10+ process
-3. **DTO-Only Communication** — modules communicate only through frozen dataclass DTOs in `contracts/`
+2. **Modular Monolith** — all code in `app/modules/`, single process
+3. **DTO-Only Communication** — modules communicate only through immutable DTOs in `contracts/`
 4. **No cross-module imports** between `app/modules/*` packages — only `contracts/` types
 5. **Orchestrator owns the call graph** — modules never call each other directly
 6. **Deterministic** — same input + same config = identical output. No `random`, no non-deterministic inference
 7. **Idempotent** — running twice on same input produces no duplicates and no corruption
 8. **Content-addressable IDs** — `entity_id = SHA256(content_signature)[:16]`
 9. **Database is the single source of truth** — `ON CONFLICT DO NOTHING` semantics
-10. **Database access** through `database/adapter.py` only — never raw SQL in modules
-11. **Structured logging** via stdlib `logging` — never use `print()`
-12. **Type hints** on all public function signatures (PEP 484)
+10. **Database access** through `database/adapter.*` only — never raw SQL in modules
+11. **Structured logging** via language-appropriate library — no unstructured console output
+12. **Type annotations** on all public function signatures
 13. **Config via YAML** — no hardcoded paths, thresholds, or magic numbers
 14. **Migration naming:** `YYYYMMDD000NNN_description.sql` — append-only
 15. **Tests** must be runnable without GPU, without network, and without real data files

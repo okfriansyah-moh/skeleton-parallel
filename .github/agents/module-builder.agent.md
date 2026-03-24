@@ -12,7 +12,6 @@ tools:
     todo,
     agent/runSubagent,
   ]
-model: claude-sonnet-4
 ---
 
 ## Role
@@ -26,18 +25,18 @@ You are a module implementation specialist. Your job is to build individual pipe
 - `.github/skills/determinism/SKILL.md` — no-randomness enforcement
 - `.github/skills/idempotency/SKILL.md` — content-addressable IDs
 - `.github/skills/config-validation/SKILL.md` — config-driven parameters
-- `.github/skills/code-quality/SKILL.md` — type hints, logging, Python standards
+- `.github/skills/code-quality/SKILL.md` — type annotations, logging, code standards
 
 ## Responsibilities
 
 1. **Create module package** under `app/modules/{module_name}/`:
-   - `__init__.py` — exports ONLY the public entry function
-   - `{module_name}.py` — core implementation
+   - A public entry point — exports ONLY the public entry function
+   - Core implementation file(s)
    - Internal helpers as needed (private, never imported externally)
 
 2. **Implement processing logic**:
-   - Accept frozen DTOs from `contracts/` as input
-   - Return frozen DTOs from `contracts/` as output
+   - Accept immutable DTOs from `contracts/` as input
+   - Return immutable DTOs from `contracts/` as output
    - Config passed as `dict` from YAML (provided by orchestrator)
    - No side effects visible to other modules
 

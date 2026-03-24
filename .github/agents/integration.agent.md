@@ -14,7 +14,6 @@ tools:
     agent/runSubagent,
   ]
 agents: [dto-guardian]
-model: claude-sonnet-4
 ---
 
 ## Role

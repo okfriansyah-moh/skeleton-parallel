@@ -1,6 +1,5 @@
 ---
 name: database-portability
-type: skill
 description: "Database engine portability. Use when writing SQL, implementing the database adapter, or reviewing database operations. Ensures all SQL is portable across supported engines and no engine-specific code leaks into modules."
 ---
 
@@ -14,10 +13,10 @@ Ensure all database operations are engine-agnostic. The database adapter is the 
 
 ### Architecture
 
-- **All database access goes through `database/adapter.py`** — the single entry point
+- **All database access goes through `database/adapter.*`** — the single entry point
 - Modules under `app/modules/` **MUST NOT** import any database driver
 - Modules **MUST NOT** contain SQL strings or execute queries
-- The adapter accepts and returns frozen dataclass DTOs — no raw rows, no dicts
+- The adapter accepts and returns immutable DTOs — no raw rows, no dicts
 - Only the orchestrator calls the adapter — modules never touch the database
 
 ### SQL Portability
@@ -57,7 +56,7 @@ database:
 ## Inputs
 
 - SQL in `database/` directory
-- Database-related code in `database/adapter.py` and `database/engines/`
+- Database-related code in `database/adapter.*` and `database/engines/`
 - Module code that might incorrectly access the database
 
 ## Outputs

@@ -1,6 +1,5 @@
 ---
 name: failure
-type: skill
 description: "Failure handling. Use when implementing retry logic, abort thresholds, graceful degradation, or error recovery. Defines retry policies, failure thresholds, state transitions on error, and timeout handling."
 ---
 
@@ -45,7 +44,7 @@ failed → queued             (manual retry, max 3 times total)
 
 ## Inputs
 
-- Pipeline execution state from `database/adapter.py`
+- Pipeline execution state from `database/adapter.*`
 - Module processing results (success/failure DTOs)
 
 ## Outputs
@@ -84,12 +83,12 @@ def run_external_safe(command: list[str], timeout: int = 300) -> subprocess.Comp
 
 ### Pre-Flight Checks
 
-```python
-def preflight_checks(input_path: str, config: dict) -> None:
-    assert sys.version_info >= (3, 10), f"Python 3.10+ required"
-    free_space = shutil.disk_usage(config["paths"]["output_dir"]).free
-    assert free_space >= config["min_disk_space_bytes"], "Insufficient disk space"
-    assert os.path.isfile(input_path), f"Input file not found: {input_path}"
+```
+# Example pre-flight (pseudocode)
+function preflight_checks(input_path, config):
+    assert runtime_version >= minimum_required
+    assert free_disk_space(config.output_dir) >= config.min_disk_space_bytes
+    assert file_exists(input_path)
 ```
 
 ## Checklist

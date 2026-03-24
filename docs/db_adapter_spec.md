@@ -7,8 +7,8 @@
 
 ## 1. Design Principles
 
-- **Single entry point:** `database/adapter.py` is the ONLY database interface
-- **DTO-based I/O:** Adapter accepts and returns frozen dataclass DTOs — no raw rows, no dicts
+- **Single entry point:** `database/adapter.*` is the ONLY database interface
+- **DTO-based I/O:** Adapter accepts and returns immutable DTOs — no raw rows, no dicts
 - **Engine-agnostic:** Switching database engines requires changes only in `database/`
 - **Portable SQL:** All queries use portable syntax compatible with all supported engines
 - **Modules are DB-free:** No module under `app/modules/` may import database drivers or contain SQL

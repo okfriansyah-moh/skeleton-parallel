@@ -64,21 +64,21 @@ phase-builder → dto-guardian → integration → refactor (conditional)
 
 ### Core Skills
 
-| Skill                | File                                           | Purpose                                     |
-| -------------------- | ---------------------------------------------- | ------------------------------------------- |
-| dto                  | `.github/skills/dto/SKILL.md`                  | DTO registry, validation, anti-patterns     |
-| pipeline             | `.github/skills/pipeline/SKILL.md`             | Stage ordering, DTO flow, parallelism       |
-| modularity           | `.github/skills/modularity/SKILL.md`           | Module boundaries, import rules             |
-| determinism          | `.github/skills/determinism/SKILL.md`          | No-randomness enforcement                   |
-| idempotency          | `.github/skills/idempotency/SKILL.md`          | Content-addressable IDs, ON CONFLICT        |
-| failure              | `.github/skills/failure/SKILL.md`              | Retry policies, degradation, thresholds     |
-| token-optimization   | `.github/skills/token-optimization/SKILL.md`   | Context compression, progressive loading    |
-| config-validation    | `.github/skills/config-validation/SKILL.md`    | Config-driven parameters, YAML enforcement  |
-| code-quality         | `.github/skills/code-quality/SKILL.md`         | Type hints, logging, Python 3.10+ standards |
-| conflict-resolution  | `.github/skills/conflict-resolution/SKILL.md`  | Git merge conflict resolution               |
-| docs-sync            | `.github/skills/docs-sync/SKILL.md`            | Documentation drift detection               |
-| database-portability | `.github/skills/database-portability/SKILL.md` | Engine-agnostic SQL, adapter patterns       |
-| running-prompt       | `.github/skills/running-prompt/SKILL.md`       | Structured task execution workflow          |
+| Skill                | File                                           | Purpose                                    |
+| -------------------- | ---------------------------------------------- | ------------------------------------------ |
+| dto                  | `.github/skills/dto/SKILL.md`                  | DTO registry, validation, anti-patterns    |
+| pipeline             | `.github/skills/pipeline/SKILL.md`             | Stage ordering, DTO flow, parallelism      |
+| modularity           | `.github/skills/modularity/SKILL.md`           | Module boundaries, import rules            |
+| determinism          | `.github/skills/determinism/SKILL.md`          | No-randomness enforcement                  |
+| idempotency          | `.github/skills/idempotency/SKILL.md`          | Content-addressable IDs, ON CONFLICT       |
+| failure              | `.github/skills/failure/SKILL.md`              | Retry policies, degradation, thresholds    |
+| token-optimization   | `.github/skills/token-optimization/SKILL.md`   | Context compression, progressive loading   |
+| config-validation    | `.github/skills/config-validation/SKILL.md`    | Config-driven parameters, YAML enforcement |
+| code-quality         | `.github/skills/code-quality/SKILL.md`         | Type annotations, logging, code standards  |
+| conflict-resolution  | `.github/skills/conflict-resolution/SKILL.md`  | Git merge conflict resolution              |
+| docs-sync            | `.github/skills/docs-sync/SKILL.md`            | Documentation drift detection              |
+| database-portability | `.github/skills/database-portability/SKILL.md` | Engine-agnostic SQL, adapter patterns      |
+| running-prompt       | `.github/skills/running-prompt/SKILL.md`       | Structured task execution workflow         |
 
 ### Skill Structure
 

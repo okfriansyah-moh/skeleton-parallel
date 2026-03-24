@@ -1,8 +1,8 @@
 # Skeleton Parallel
 
-> A generic, reusable development framework for building deterministic pipeline systems
-> with AI-assisted parallel development. Database-agnostic, technology-flexible, and
-> ready for any project from scratch.
+> A generic, reusable, language-agnostic development framework for building deterministic
+> pipeline systems with AI-assisted parallel development. Database-agnostic, technology-flexible,
+> and ready for any project from scratch.
 
 ---
 
@@ -15,7 +15,7 @@ A **production-grade project skeleton** that provides:
 - **Deterministic pipeline architecture** — Same input + same config = identical output
 - **Database-agnostic design** — Choose any engine; modules never touch SQL directly
 - **Self-healing retry system** — Bounded retries with checkpoint/rollback at every stage
-- **Documentation-first workflow** — Architecture drives implementation, not the other way around
+- **Language-agnostic architecture** — Works with Python, TypeScript, Go, or any language
 
 ## Quick Start
 
@@ -71,17 +71,17 @@ skeleton-parallel/
 │       ├── failure/SKILL.md       # Retry, abort, degradation
 │       ├── token-optimization/    # Context compression
 │       ├── config-validation/     # Config-driven parameters
-│       ├── code-quality/          # Type hints, logging, standards
+│       ├── code-quality/          # Type annotations, logging, standards
 │       ├── conflict-resolution/   # Git merge conflict resolution
 │       ├── docs-sync/             # Documentation drift detection
 │       ├── database-portability/  # Engine-agnostic SQL
 │       └── running-prompt/        # Structured task execution
 ├── docs/                          # Architecture + specs (templates)
-├── contracts/                     # DTO definitions (frozen dataclasses)
+├── contracts/                     # Immutable DTO definitions
 ├── database/                      # DB adapter + engine implementations + migrations
 ├── config/                        # YAML configuration
 ├── app/                           # Application code
-│   ├── main.py                    # Entry point
+│   ├── main.*                     # Entry point (language-specific)
 │   ├── modules/                   # One package per pipeline stage
 │   └── orchestrator/              # Pipeline orchestration
 ├── tests/                         # Unit + integration tests
@@ -95,12 +95,13 @@ skeleton-parallel/
 | Principle              | Rule                                                                     |
 | ---------------------- | ------------------------------------------------------------------------ |
 | Modular monolith       | Single process, single database, no microservices                        |
-| DTO communication      | Modules communicate only through frozen dataclasses in `contracts/`      |
+| DTO communication      | Modules communicate only through immutable DTOs in `contracts/`          |
 | Orchestrator authority | Only the orchestrator calls modules, manages state, accesses the DB      |
 | Deterministic          | Same input + same config = identical output, always                      |
 | Idempotent             | Content-addressable IDs, `ON CONFLICT DO NOTHING`                        |
-| Database-agnostic      | All DB access through `database/adapter.py` — engine chosen per project  |
+| Database-agnostic      | All DB access through `database/adapter.*` — engine chosen per project   |
 | Technology-flexible    | Forbidden-by-default tech can be overridden when the project requires it |
+| Language-agnostic      | Architectural rules don’t mandate any specific programming language      |
 
 ## Parallel Development Modes
 
@@ -146,21 +147,21 @@ On failure: automatic rollback to Git checkpoint. No infinite loops.
 
 Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on-demand by agents to minimize token usage while maintaining constraint enforcement.
 
-| Skill                | Purpose                                     |
-| -------------------- | ------------------------------------------- |
-| dto                  | DTO registry, validation, anti-patterns     |
-| pipeline             | Stage ordering, DTO flow, parallelism       |
-| modularity           | Module boundaries, import rules             |
-| determinism          | No-randomness enforcement                   |
-| idempotency          | Content-addressable IDs, ON CONFLICT        |
-| failure              | Retry policies, degradation, thresholds     |
-| token-optimization   | Context compression, progressive loading    |
-| config-validation    | Config-driven parameters, YAML enforcement  |
-| code-quality         | Type hints, logging, Python 3.10+ standards |
-| conflict-resolution  | Git merge conflict resolution               |
-| docs-sync            | Documentation drift detection               |
-| database-portability | Engine-agnostic SQL, adapter patterns       |
-| running-prompt       | Structured task execution workflow          |
+| Skill                | Purpose                                    |
+| -------------------- | ------------------------------------------ |
+| dto                  | DTO registry, validation, anti-patterns    |
+| pipeline             | Stage ordering, DTO flow, parallelism      |
+| modularity           | Module boundaries, import rules            |
+| determinism          | No-randomness enforcement                  |
+| idempotency          | Content-addressable IDs, ON CONFLICT       |
+| failure              | Retry policies, degradation, thresholds    |
+| token-optimization   | Context compression, progressive loading   |
+| config-validation    | Config-driven parameters, YAML enforcement |
+| code-quality         | Type annotations, logging, code standards  |
+| conflict-resolution  | Git merge conflict resolution              |
+| docs-sync            | Documentation drift detection              |
+| database-portability | Engine-agnostic SQL, adapter patterns      |
+| running-prompt       | Structured task execution workflow         |
 
 ## Documentation
 
@@ -178,9 +179,9 @@ Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on
 
 ## Requirements
 
-- Python 3.10+
 - Git 2.5+ (worktree support)
 - VS Code + GitHub Copilot
+- Runtime environment for the project’s chosen language
 - (Optional) Copilot CLI for automated parallel execution
 
 ## License

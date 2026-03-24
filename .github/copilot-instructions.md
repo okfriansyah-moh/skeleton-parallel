@@ -18,7 +18,7 @@
 | `docs/AGENTS_AND_SKILLS.md`      | Agent/skill system — agents, skills, composition matrices, token optimization, parallel dev integration   |
 | `docs/STARTER_GUIDE.md`          | Getting started playbook — setup, architecture generation, roadmap generation, parallel system usage      |
 | `docs/PROGRESS_REPORT.md`        | Implementation status — completed work, test results, remaining items, phase-by-phase progress tracking   |
-| `contracts/`                     | Frozen dataclass DTO definitions — all modules MUST use these, not upstream sources or raw dicts          |
+| `contracts/`                     | Immutable DTO definitions — all modules MUST use these, not upstream sources or raw dicts/objects         |
 | `config/`                        | YAML configuration files — all thresholds, paths, and tunable parameters live here                        |
 
 When generating code, refer to these documents for exact schemas, DTO definitions, interfaces, and algorithms. Do not invent new structures that contradict them.
@@ -30,14 +30,14 @@ When generating code, refer to these documents for exact schemas, DTO definition
 ### Modular Monolith
 
 - Single process, single repo, single database
-- Entry point: `app/main.py` (or project-specific entry point)
+- Entry point: `app/main.*` (language-specific, e.g., `main.py`, `main.ts`, `main.go`)
 - No microservices, no inter-process communication, no network calls between modules
 
 ### Module Communication
 
-- Modules communicate **only** through frozen dataclass DTOs defined in `contracts/`
+- Modules communicate **only** through immutable DTO types defined in `contracts/`
 - No direct imports between module internals — only public contracts
-- No raw dicts, no untyped data crossing module boundaries
+- No raw dicts/maps/objects, no untyped data crossing module boundaries
 - See `docs/dto_contracts.md` for DTO definitions and validation rules
 
 ### Pipeline Architecture
@@ -72,10 +72,10 @@ stage_1 → stage_2 → stage_3 → ... → stage_N
 
 ### Database Adapter
 
-- **All database access goes through `database/adapter.py`** — the single entry point
-- Modules under `app/modules/` **MUST NOT** import `sqlite3`, `psycopg2`, or any database driver
+- **All database access goes through `database/adapter.*`** — the single entry point
+- Modules under `app/modules/` **MUST NOT** import any database driver directly
 - Modules **MUST NOT** contain SQL strings or execute queries
-- The adapter accepts and returns frozen dataclass DTOs — no raw rows, no dicts
+- The adapter accepts and returns immutable DTOs — no raw rows, no dicts/maps
 - Only the orchestrator calls the adapter — modules never touch the database
 - All SQL uses portable syntax (`ON CONFLICT DO NOTHING`, not `INSERT OR IGNORE`)
 - See `docs/db_adapter_spec.md` for the full adapter interface and migration strategy
@@ -94,7 +94,7 @@ The orchestrator is the **ONLY** component that:
 - Calls modules (modules never call each other)
 - Manages execution order (the pipeline stage sequence)
 - Performs checkpointing (writes `last_completed_stage` after each stage)
-- Writes to the database (via `database/adapter.py`)
+- Writes to the database (via `database/adapter.*`)
 - Routes DTOs between modules (passes output of stage N as input to stage N+1)
 - Handles failures (decides retry, skip, or abort)
 
@@ -102,7 +102,7 @@ Modules MUST:
 
 - Be **pure functions** — accept DTOs, return DTOs, no side effects on shared state
 - **Not call the database** — no imports from `database/`, no SQL, no adapter calls
-- **Not call other modules** — no imports from `app.modules.*` (only `contracts/`)
+- **Not call other modules** — no imports from other modules (only `contracts/`)
 - **Not manage their own state** — all state lives in the database, managed by the orchestrator
 - **Not perform checkpointing** — only the orchestrator decides when to persist progress
 
@@ -125,9 +125,9 @@ Do not introduce any of these unless the project explicitly requires them:
 ### Database Engine Policy
 
 - **The database engine is project-specific.** Choose the appropriate engine when setting up a new project.
-- **Supported engines are configured via `database/adapter.py`.** See `docs/db_adapter_spec.md`.
+- **Supported engines are configured via `database/adapter.*`.** See `docs/db_adapter_spec.md`.
 - **Modules MUST remain database-agnostic.** No module may reference any specific database engine.
-- Direct use of any database driver (`sqlite3`, `psycopg2`, `asyncpg`, etc.) in `app/modules/` is forbidden.
+- Direct use of any database driver in `app/modules/` is forbidden.
 - The adapter is the **sole abstraction boundary** — switching engines requires changes only in `database/`.
 
 ---
@@ -137,13 +137,13 @@ Do not introduce any of these unless the project explicitly requires them:
 ```
 skeleton-parallel/
 ├── app/
-│   ├── main.py              # Single entry point
+│   ├── main.*               # Single entry point (language-specific)
 │   ├── modules/             # Domain modules (one package per stage)
 │   │   ├── module_a/
 │   │   ├── module_b/
 │   │   └── ...
 │   └── orchestrator/        # Pipeline orchestration + checkpointing
-├── contracts/               # DTO definitions (frozen dataclasses)
+├── contracts/               # Immutable DTO definitions
 ├── database/                # DB adapter + engine implementations + migrations
 ├── config/                  # YAML configuration
 ├── tests/                   # Unit + integration tests
@@ -166,14 +166,35 @@ skeleton-parallel/
 
 ## Development Rules
 
-1. **Python 3.10+** — Use type hints on all public interfaces
-2. **Frozen dataclasses** for all DTOs — no mutable state crossing module boundaries
-3. **Each module** gets its own package under `app/modules/` with `__init__.py` exposing only the public contract
+1. **Language & runtime** — Use the project's chosen language and version. Use type annotations on all public interfaces
+2. **Immutable DTOs** for all contracts — no mutable state crossing module boundaries
+3. **Each module** gets its own package under `app/modules/` with a public entry point exposing only the public contract
 4. **No module may import another module's internals** — only `contracts/` types
-5. **Database access** through `database/adapter.py` only — no raw SQL in modules, no ORM, no SQLAlchemy
+5. **Database access** through `database/adapter.*` only — no raw SQL in modules, no ORM
 6. **Tests** must be runnable without GPU, without network, and without real data files
 7. **Config** via YAML files — no hardcoded paths, thresholds, or magic numbers
-8. **Logging** via stdlib `logging` — structured, leveled, no print statements
+8. **Logging** via structured logging (language-appropriate library) — leveled, no unstructured console output
+
+---
+
+## File Duplication Prevention
+
+**MUST NOT:**
+
+- Create duplicate files with similar names (e.g., `utils.py` and `helpers.py` with overlapping functions)
+- Create new utility modules when existing ones already cover the functionality
+- Duplicate DTO definitions — all DTOs live in `contracts/` and are defined exactly once
+- Copy SQL schemas between migration files — reference the existing table, don't redefine it
+- Duplicate configuration defaults — all defaults live in `config.yaml`, not scattered in code
+- Create wrapper modules that simply re-export another module's functions
+
+**MUST:**
+
+- Check existing files before creating new ones — use the project structure as the source of truth
+- Reuse existing utility functions from `contracts/`, `core/`, and shared helpers
+- Place new code in the correct existing module rather than creating a parallel file
+- When adding a new module, verify no existing module already handles that responsibility
+- Keep one canonical location for each piece of logic — no copies, no forks, no alternatives
 
 ---
 

@@ -1,9 +1,3 @@
----
-mode: "agent"
-description: "Generate the database adapter specification (docs/db_adapter_spec.md) from the architecture."
-tools: ["read", "edit", "search"]
----
-
 # Database Adapter Specification Prompt
 
 You are a Staff+ backend architect. Generate a complete `docs/db_adapter_spec.md`.
@@ -20,8 +14,8 @@ Generate `docs/db_adapter_spec.md` with:
 
 ### 1. Design Principles
 
-- Single entry point: `database/adapter.py`
-- Accepts and returns frozen dataclass DTOs — no raw rows, no dicts
+- Single entry point: `database/adapter.*`
+- Accepts and returns immutable DTOs — no raw rows, no dicts
 - All SQL uses portable syntax compatible with all supported engines
 - Engine-agnostic interface — switching engines requires changes only in `database/`
 

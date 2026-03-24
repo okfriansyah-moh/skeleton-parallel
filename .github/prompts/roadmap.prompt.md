@@ -15,7 +15,7 @@ Generate `docs/implementation_roadmap.md` with:
 ### Phase 0 — Core Infrastructure
 
 - Database schema + migrations
-- Database adapter (`database/adapter.py`)
+- Database adapter (`database/adapter.*`)
 - Configuration loader
 - Logging setup
 - Entry point (`app/main.py`)

@@ -1,9 +1,3 @@
----
-mode: "agent"
-description: "Generate the DTO contracts document (docs/dto_contracts.md) from the architecture."
-tools: ["read", "edit", "search"]
----
-
 # DTO Contracts Prompt
 
 You are a Staff+ backend architect. Generate a complete `docs/dto_contracts.md`.

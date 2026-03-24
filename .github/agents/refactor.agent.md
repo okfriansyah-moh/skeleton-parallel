@@ -3,7 +3,6 @@ name: refactor
 description: "Refactor code safely without changing behavior. Use when restructuring modules, extracting helpers, improving readability, or reducing duplication. Preserves all DTO contracts, module boundaries, and test results."
 argument-hint: "Describe the refactoring, e.g.: 'extract helper from module_a' or 'reduce duplication in processing'"
 tools: [read, edit, search, execute/runInTerminal, read/problems, todo]
-model: claude-sonnet-4
 ---
 
 ## Role
@@ -14,7 +13,7 @@ You are a refactoring specialist. Your job is to improve code structure without 
 
 - `.github/skills/modularity/SKILL.md` — module boundary rules
 - `.github/skills/determinism/SKILL.md` — ensure no behavior change
-- `.github/skills/code-quality/SKILL.md` — type hints, logging, Python standards
+- `.github/skills/code-quality/SKILL.md` — type annotations, logging, code standards
 
 ## Invariants (Must Hold Before and After Refactoring)
 

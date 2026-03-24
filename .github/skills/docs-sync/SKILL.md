@@ -1,6 +1,5 @@
 ---
 name: docs-sync
-type: skill
 description: "Documentation synchronization. Use when verifying that code implementations match their documentation specifications. Detects drift between docs/ specifications and actual code."
 ---
 
@@ -60,7 +59,7 @@ Code (app/orchestrator/pipeline.py):
 Spec (docs/db_adapter_spec.md):
   def create_run(self, run: PipelineRunDTO) -> None
 
-Code (database/adapter.py):
+Code (database/adapter.*):
   def create_run(self, run_id: str, input_path: str) -> None
   ❌ DRIFT: adapter should accept PipelineRunDTO, not raw args
 ```

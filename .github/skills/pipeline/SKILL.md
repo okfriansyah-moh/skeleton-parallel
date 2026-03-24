@@ -1,6 +1,5 @@
 ---
 name: pipeline
-type: skill
 description: "Pipeline reasoning. Use when validating stage ordering, understanding dependencies between modules, checking checkpoint behavior, or planning parallel development. Provides the stage sequence pattern, DTO flow map, and parallelism matrix."
 ---
 
@@ -16,7 +15,7 @@ Enforce correct pipeline stage ordering, validate DTO flow between stages, and s
 - Never skip stages
 - Never parallelize stages at runtime
 - Some stages may be per-entity (run once per item in a batch)
-- All checkpoint writes go through `database/adapter.py`
+- All checkpoint writes go through `database/adapter.*`
 
 ## Inputs
 

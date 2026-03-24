@@ -1,6 +1,5 @@
 ---
 name: modularity
-type: skill
 description: "Module boundary enforcement. Use when creating modules, reviewing imports, or validating the modular monolith architecture. Prevents cross-module imports, enforces package structure, and defines file ownership per phase."
 ---
 
@@ -53,8 +52,8 @@ def process(input_dto: InputDTO, config: dict) -> OutputDTO:
     ...
 ```
 
-- Input: frozen dataclass DTOs from `contracts/`
-- Output: frozen dataclass DTO from `contracts/`
+- Input: immutable DTOs from `contracts/`
+- Output: immutable DTO from `contracts/`
 - Config: dict from YAML (passed by orchestrator)
 - No side effects visible to other modules
 - No shared mutable state

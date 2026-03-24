@@ -11,9 +11,9 @@ All DTOs in this system MUST follow these rules:
 
 ### Structure
 
-- All DTOs are `@dataclass(frozen=True)` — immutable after creation
-- No methods, no properties, no `__post_init__` logic
-- All fields must have type hints (PEP 484)
+- All DTOs are **immutable** (language-specific: frozen dataclass, readonly interface, record class, etc.)
+- No methods, no properties, no post-initialization logic
+- All fields must have **type annotations**
 - DTOs live exclusively in `contracts/` — never in modules
 
 ### Serialization

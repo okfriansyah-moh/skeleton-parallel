@@ -3,7 +3,6 @@ name: orchestrator
 description: "Enforce orchestrator execution model. Use when building, modifying, or reviewing the pipeline orchestrator. Validates stage ordering, checkpoint logic, resume behavior, pre-flight checks, and state transitions per docs/orchestrator_spec.md."
 argument-hint: "Describe the orchestrator change, e.g.: 'add checkpoint after stage_a' or 'review resume logic'"
 tools: [read, edit, search, execute/runInTerminal, read/problems, todo]
-model: claude-sonnet-4
 ---
 
 ## Role
@@ -35,7 +34,7 @@ You are a pipeline orchestrator specialist. Your job is to build and validate th
    - If incomplete → reconstruct DTOs from DB, resume from next stage
 
 4. **Pre-flight checks** — Before pipeline starts:
-   - Validate runtime dependencies (Python version, external tools)
+   - Validate runtime dependencies (runtime version, external tools)
    - Check disk space
    - Validate input data (exists, readable, correct format)
 
@@ -66,7 +65,7 @@ You are a pipeline orchestrator specialist. Your job is to build and validate th
 - Do NOT change stage ordering
 - Do NOT bypass checkpoint writes
 - Database is the single source of truth for all pipeline state
-- All database access goes through `database/adapter.py`
+- All database access goes through `database/adapter.*`
 - The orchestrator is the ONLY component that calls the adapter
 - All SQL uses portable syntax (`ON CONFLICT DO NOTHING`, not `INSERT OR IGNORE`)
 

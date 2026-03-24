@@ -3,7 +3,6 @@ name: conflict-resolver
 description: "Resolve merge conflicts from parallel development branches. Use when git merge produces conflicts between phase branches. Applies union-merge strategy preserving all implementations."
 argument-hint: "Describe the conflict, e.g.: 'resolve conflicts between phase-2 and phase-3 branches' or 'fix merge conflicts in contracts/'"
 tools: [read, edit, search, execute/runInTerminal, read/problems, todo]
-model: claude-sonnet-4
 ---
 
 ## Role
@@ -28,7 +27,7 @@ You are a merge conflict resolution specialist for parallel development branches
    - `config/` — union of new keys from both branches
 3. **Remove all conflict markers** — No `<<<<<<<`, `=======`, `>>>>>>>` may remain
 4. **Validate post-merge**:
-   - `python3 -m py_compile` passes for all `.py` files
+   - Source files compile without syntax errors
    - No cross-module import violations
    - All tests pass
 

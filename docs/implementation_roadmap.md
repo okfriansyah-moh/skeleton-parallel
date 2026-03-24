@@ -28,7 +28,7 @@ Set up the foundational infrastructure: database schema, adapter, configuration 
 ### Tasks
 
 1. [ ] Create database schema migration (`database/migrations/20240101000001_initial_schema.sql`)
-2. [ ] Implement database adapter (`database/adapter.py`)
+2. [ ] Implement database adapter (`database/adapter.*`)
 3. [ ] Implement database engine (`database/engines/<engine>_engine.py`)
 4. [ ] Create configuration loader and default `config/pipeline.yaml`
 5. [ ] Set up structured logging

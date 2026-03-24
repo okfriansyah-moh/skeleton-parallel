@@ -1,6 +1,5 @@
 ---
 name: idempotency
-type: skill
 description: "Idempotency enforcement. Use when implementing database writes, file operations, or pipeline resume logic. Ensures running the pipeline twice on the same input produces no duplicates and no corruption."
 ---
 
@@ -10,7 +9,7 @@ description: "Idempotency enforcement. Use when implementing database writes, fi
 
 Ensure the pipeline can be safely re-run on the same input without creating duplicates or corrupting data. Covers database writes, file operations, and pipeline resume logic.
 
-> **All database operations MUST go through `database/adapter.py`.** Modules under `app/modules/` never touch the database. See `docs/db_adapter_spec.md`.
+> **All database operations MUST go through `database/adapter.*`.** Modules under `app/modules/` never touch the database. See `docs/db_adapter_spec.md`.
 
 ## Rules
 
@@ -23,7 +22,7 @@ Ensure the pipeline can be safely re-run on the same input without creating dupl
 - All INSERTs use `ON CONFLICT DO NOTHING` or `ON CONFLICT DO UPDATE`
 - All SQL uses parameterized queries (no string interpolation)
 - All SQL uses portable syntax per `docs/db_adapter_spec.md`
-- All database access goes through `database/adapter.py`
+- All database access goes through `database/adapter.*`
 
 ### File Write Patterns
 
@@ -37,7 +36,7 @@ Ensure the pipeline can be safely re-run on the same input without creating dupl
 
 ## Inputs
 
-- Database operations in `database/adapter.py`
+- Database operations in `database/adapter.*`
 - File write operations in modules
 - Pipeline resume logic in `app/orchestrator/`
 
@@ -98,7 +97,7 @@ else:
 - [ ] All INSERTs use `ON CONFLICT DO NOTHING` or `ON CONFLICT DO UPDATE`
 - [ ] All SQL uses parameterized queries (no string interpolation)
 - [ ] All SQL uses portable syntax per `docs/db_adapter_spec.md`
-- [ ] All database access goes through `database/adapter.py`
+- [ ] All database access goes through `database/adapter.*`
 - [ ] All file writes use atomic write-then-rename pattern
 - [ ] Pipeline checks for existing completed run before starting
 - [ ] Per-entity processing skips already-completed items

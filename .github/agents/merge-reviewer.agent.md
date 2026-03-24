@@ -3,9 +3,16 @@ name: merge-reviewer
 description: "Review merged integration branches for correctness. Use after merging parallel branches to validate the combined codebase: DTO flow integrity, module boundaries, orchestrator wiring, and quality gates."
 argument-hint: "Describe what to review, e.g.: 'review integration branch after merging phases 2 and 3' or 'validate merged codebase'"
 tools:
-  [read, search, execute/runInTerminal, read/problems, todo, agent/runSubagent]
+  [
+    read,
+    search,
+    execute/runInTerminal,
+    read/problems,
+    todo,
+    agent,
+    agent/runSubagent,
+  ]
 agents: [dto-guardian, integration]
-model: claude-sonnet-4
 ---
 
 ## Role

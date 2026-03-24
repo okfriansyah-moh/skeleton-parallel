@@ -6,15 +6,12 @@
 
 ```
 app/
-├── main.py              # Entry point — parses args, calls orchestrator
+├── main.*               # Entry point (language-specific) — parses args, calls orchestrator
 ├── orchestrator/        # Pipeline orchestration + checkpointing
-│   ├── __init__.py
-│   └── pipeline.py      # Stage execution, checkpoint/resume, DTO routing
+│   └── ...              # Stage execution, checkpoint/resume, DTO routing
 └── modules/             # One package per pipeline stage
-    ├── __init__.py
     └── stage_name/      # Example module
-        ├── __init__.py
-        └── processor.py # Pure function: accepts DTO → returns DTO
+        └── ...          # Pure function: accepts DTO → returns DTO
 ```
 
 ## Module Rules
@@ -23,6 +20,6 @@ app/
 2. **No database access** — no imports from `database/`, no SQL, no adapter calls
 3. **No cross-module imports** — only import from `contracts/`
 4. **No state management** — all state lives in the database
-5. **No print()** — use `logging` module
+5. **No unstructured console output** — use structured logging
 6. **Deterministic** — same input = same output, no randomness
-7. **Type hints** — all public interfaces must have type annotations
+7. **Type annotations** — all public interfaces must have type annotations

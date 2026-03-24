@@ -9,7 +9,7 @@
 ## 1. Overview
 
 This framework supports parallel development of pipeline phases. Most phases own isolated
-modules under `app/modules/` and communicate only through frozen DTOs in `contracts/`.
+modules under `app/modules/` and communicate only through immutable DTOs in `contracts/`.
 This isolation enables parallel development — multiple phases implemented at the same time
 by independent AI agents.
 
@@ -281,7 +281,7 @@ phase-builder (up to 5 retries)
 #### DTO Guardian (STRICT)
 
 - **Execute:** Copilot `dto-guardian` agent validates `contracts/`
-- **Validate:** All dataclasses frozen, no missing/extra fields, no mutable defaults
+- **Validate:** All DTOs immutable, no missing/extra fields, no mutable defaults
 - **Fix:** `dto-guardian` agent fixes DTO issues
 - **On failure:** Rollback to checkpoint
 
@@ -312,15 +312,15 @@ phase-builder (up to 5 retries)
 
 ### Quality Gate Checks (All Modes)
 
-1. **Import check** — `python -c 'import app'` succeeds
+1. **Import check** — Project compiles/imports successfully
 2. **Lint check** — No lint errors in modified files
-3. **Test check** — `pytest tests/ --tb=short -q` passes
+3. **Test check** — Test suite passes
 4. **SQL check** — No database driver imports in `app/modules/`
-5. **Cross-module check** — No `from app.modules.X` imports in other modules
-6. **Print check** — No `print()` statements in `app/modules/`
-7. **DTO validation** — All dataclasses in `contracts/` are frozen
-8. **Orchestrator integrity** — No `from database` or `import adapter` in `app/modules/`
+5. **Cross-module check** — No cross-module imports between `app/modules/` packages
+6. **Console check** — No unstructured console output in `app/modules/`
+7. **DTO validation** — All DTOs in `contracts/` are immutable
+8. **Orchestrator integrity** — No database imports in `app/modules/`
 9. **Protected files** — Warns if `contracts/`, `database/`, or `docs/` were modified
-10. **Deterministic ordering** — No unordered dict/set iteration without `sorted()`
+10. **Deterministic ordering** — No unordered iteration of collections without explicit sorting
 
 Gates 1–8 are **blocking** (cause failure). Gates 9–10 are **advisory**.

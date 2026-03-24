@@ -105,18 +105,18 @@ if start_index > 2:
 
 Before the pipeline starts, validate:
 
-1. **Python version** — >= 3.10
+1. **Runtime version** — Meets project's minimum requirement
 2. **Disk space** — Sufficient free space for output
 3. **Input validation** — Input exists, readable, correct format
 4. **External dependencies** — Required tools available in PATH (project-specific)
 5. **Database** — Can connect, schema is up to date
 
-```python
-def preflight(input_path: str, config: dict) -> None:
-    assert sys.version_info >= (3, 10)
-    assert os.path.isfile(input_path)
-    free = shutil.disk_usage(config["paths"]["output_dir"]).free
-    assert free >= config["thresholds"]["min_disk_space_mb"] * 1024 * 1024
+```
+# Example pre-flight (pseudocode)
+function preflight(input_path, config):
+    assert runtime_version >= minimum_required
+    assert file_exists(input_path)
+    assert free_disk_space(config.output_dir) >= config.min_disk_space_mb * 1024 * 1024
 ```
 
 ---
@@ -219,7 +219,7 @@ result_c = stage_c.process(result_a, result_b, config)
 
 ## 9. Database Interaction
 
-All database operations go through `database/adapter.py`:
+All database operations go through `database/adapter.*`:
 
 ```python
 adapter = DatabaseAdapter(config)

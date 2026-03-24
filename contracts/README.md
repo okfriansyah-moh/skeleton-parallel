@@ -1,16 +1,16 @@
 # DTO Contract Templates
 
-> This directory holds frozen dataclass definitions used to communicate between modules.
+> This directory holds immutable DTO definitions used to communicate between modules.
 > All DTOs must be defined here — never in module code.
 
 ## Rules
 
-- **Frozen only** — all dataclasses use `@dataclass(frozen=True)`
+- **Immutable only** — all DTOs must be immutable (language-specific: frozen dataclass, readonly interface, record, etc.)
 - **Additive only** — new DTOs allowed, existing fields never modified
-- **No mutable defaults** — use `tuple` instead of `list`, no `dict` defaults
-- **Type hints required** — every field must have a type annotation
+- **No mutable defaults** — use immutable collections, no mutable defaults
+- **Type annotations required** — every field must have a type annotation
 
-## Example
+## Example (Python)
 
 ```python
 from dataclasses import dataclass
@@ -25,7 +25,7 @@ class ExampleDTO:
     metadata: Optional[str] = None
 ```
 
-## Usage
+## Usage (Python)
 
 ```python
 # In contracts/example.py — define the DTO

@@ -1,9 +1,3 @@
----
-mode: "agent"
-description: "Generate the orchestrator specification (docs/orchestrator_spec.md) from the architecture and roadmap."
-tools: ["read", "edit", "search"]
----
-
 # Orchestrator Specification Prompt
 
 You are a Staff+ backend architect. Generate a complete `docs/orchestrator_spec.md`.
@@ -73,7 +67,7 @@ For each stage boundary, define:
 
 ### 9. Database Interaction
 
-- All DB access through `database/adapter.py`
+- All DB access through `database/adapter.*`
 - Adapter accepts/returns frozen DTOs
 - All SQL uses portable syntax
 

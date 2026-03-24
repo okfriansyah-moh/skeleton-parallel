@@ -404,7 +404,7 @@ dto_guardian_execute() {
     cd "${work_dir}"
     local dg_log="${LOG_DIR}/${phase_label}-dto-guardian-${attempt}.log"
     copilot \
-        -p "Validate all DTOs in contracts/ against docs/dto_contracts.md. STRICT checks: no missing fields, no extra fields, no type mismatches, all dataclasses are frozen. Use skills: dto. MANDATORY: Use ONLY skills as primary knowledge source. DO NOT read full documentation unless skills are insufficient. Report violations and fix them. Commit fixes if any." \
+        -p "Validate all DTOs in contracts/ against docs/dto_contracts.md. STRICT checks: no missing fields, no extra fields, no type mismatches, all DTOs are immutable. Use skills: dto. MANDATORY: Use ONLY skills as primary knowledge source. DO NOT read full documentation unless skills are insufficient. Report violations and fix them. Commit fixes if any." \
         --agent=dto-guardian \
         --model="${model}" \
         --no-ask-user \
@@ -440,7 +440,7 @@ dto_guardian_fix() {
     cd "${work_dir}"
     local fix_log="${LOG_DIR}/${phase_label}-dto-fix-${attempt}.log"
     copilot \
-        -p "DTO validation failed. Fix DTO-specific issues ONLY: ensure all dataclasses are frozen, no missing/extra fields, no type mismatches, no mutable defaults. Use skills: dto. Commit fixes." \
+        -p "DTO validation failed. Fix DTO-specific issues ONLY: ensure all DTOs are immutable, no missing/extra fields, no type mismatches, no mutable defaults. Use skills: dto. Commit fixes." \
         --agent=dto-guardian \
         --model="${model}" \
         --no-ask-user \
@@ -731,12 +731,12 @@ generate_phase_task() {
    - `idempotency` — Content-addressable IDs, ON CONFLICT DO NOTHING
    - `database-portability` — Engine-agnostic SQL patterns
    - `config-validation` — Config-driven parameters
-   - `code-quality` — Type hints, logging, standards
+   - `code-quality` — Type annotations, logging, standards
 2. Read `.github/copilot-instructions.md` for hard architectural constraints.
 3. **DO NOT read full documentation** unless skills are insufficient. If you do read docs, explain WHY skills were not enough.
 4. Only consult `docs/implementation_roadmap.md` for specific phase details NOT covered by skills.
 5. Implement each phase below sequentially, committing after each one.
-6. Run tests after each phase: `pytest tests/ --tb=short -q`
+6. Run tests after each phase.
 
 ## Protected File Policy (STRICT)
 
@@ -781,9 +781,9 @@ HEADER
 **Only if skills are insufficient**, consult \`docs/implementation_roadmap.md\` → Phase ${phase} section.
 
 **Constraints:**
-- All DTOs must be frozen dataclasses in \`contracts/\`
-- All database access through \`database/adapter.py\` only — orchestrator calls adapter, modules NEVER touch the database
-- No \`print()\` — use \`logging\` module
+- All DTOs must be immutable types in \`contracts/\`
+- All database access through \`database/adapter.*\` only — orchestrator calls adapter, modules NEVER touch the database
+- No unstructured console output — use structured logging
 - No cross-module imports — only \`contracts/\` types
 - No module may call another module — only the orchestrator calls modules
 - All IDs are content-addressable (SHA256-based)
@@ -792,8 +792,8 @@ HEADER
 - Protected files: \`contracts/*\` (additive only), \`database/*\` (Phase 0 only), \`docs/*\` (read-only)
 
 **After implementation:**
-1. Run \`pytest tests/ --tb=short -q\` and fix all failures
-2. Run \`python3 -c "import app"\` to verify imports
+1. Run tests and fix all failures
+2. Verify the project compiles/imports successfully
 3. Commit with message: \`feat(phase-${phase}): implement ${name}\`
 
 ---
@@ -804,6 +804,8 @@ EOF
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Quality gates
+# NOTE: These checks default to Python tooling (pytest, ruff, py_compile).
+# For other languages, adapt the lint/test/compile commands below.
 # ─────────────────────────────────────────────────────────────────────────────
 
 run_quality_gates() {
@@ -864,7 +866,7 @@ run_quality_gates() {
     log_info "Checking for raw SQL in modules..."
     if [[ -d "app/modules" ]]; then
         if grep -rn "import sqlite3\|import psycopg2\|import asyncpg" app/modules/ 2>/dev/null; then
-            log_error "Raw database imports found in app/modules/ — must use database/adapter.py"
+            log_error "Raw database imports found in app/modules/ — must use database/adapter"
             ((failures++))
         else
             log_success "No raw SQL imports in app/modules/"

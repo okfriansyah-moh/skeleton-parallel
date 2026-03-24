@@ -1,6 +1,5 @@
 ---
 name: config-validation
-type: skill
 description: "Configuration validation and management. Use when creating, modifying, or reviewing YAML configuration files. Ensures no hardcoded values, correct config structure, and config-driven parameter management."
 ---
 

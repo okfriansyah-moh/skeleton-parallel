@@ -1,6 +1,5 @@
 ---
 name: determinism
-type: skill
 description: "Determinism enforcement. Use when implementing or reviewing code to ensure same input + same config = identical output. Detects randomness, non-deterministic patterns, and sorting violations."
 ---
 

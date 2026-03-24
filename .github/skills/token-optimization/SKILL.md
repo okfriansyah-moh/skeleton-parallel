@@ -1,6 +1,5 @@
 ---
 name: token-optimization
-type: skill
 description: "Token optimization for development agents. Use when designing agent prompts, planning context loading, or reducing redundant document reads. Provides strategies for progressive loading, skill-first approach, and context compression."
 ---
 

@@ -20,7 +20,7 @@ database/
 
 - Only `app/orchestrator/` may import from `database/`
 - `app/modules/` MUST NOT import any database driver directly
-- The adapter accepts and returns frozen dataclass DTOs
+- The adapter accepts and returns immutable DTOs
 - All SQL uses portable syntax (ON CONFLICT DO NOTHING)
 - Parameterized queries only — no string interpolation
 - Engine-specific settings belong in `database/engines/` only

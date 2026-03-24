@@ -1,22 +1,21 @@
 ---
 name: dto
-type: skill
-description: "DTO interpretation and validation. Use when creating, modifying, reviewing, or consuming frozen dataclass DTOs from contracts/. Provides the DTO registry pattern, field types, constraints, producer/consumer mapping, and anti-patterns."
+description: "DTO interpretation and validation. Use when creating, modifying, reviewing, or consuming immutable DTOs from contracts/. Provides the DTO registry pattern, field types, constraints, producer/consumer mapping, and anti-patterns."
 ---
 
 # DTO Interpretation Skill
 
 ## Purpose
 
-Enforce frozen dataclass DTO contracts across the entire codebase. Ensures all cross-module data exchange uses typed, immutable DTOs defined in `contracts/`.
+Enforce immutable DTO contracts across the entire codebase. Ensures all cross-module data exchange uses typed, immutable DTOs defined in `contracts/`.
 
 ## Rules
 
 ### All DTOs
 
-- Must be `@dataclass(frozen=True)`
-- No methods, no properties, no `__post_init__` logic
-- All fields typed (PEP 484)
+- Must be **immutable** (language-specific: frozen dataclass, readonly interface, record class, etc.)
+- No methods, no properties, no post-initialization logic
+- All fields typed with annotations
 - JSON-serializable only: `str`, `int`, `float`, `bool`, `None`, `list`, `tuple`, nested DTOs
 - Forbidden types: `datetime`, `Path`, `bytes`, `set`, `complex`, class instances
 
@@ -34,7 +33,7 @@ Enforce frozen dataclass DTO contracts across the entire codebase. Ensures all c
 
 ## Inputs
 
-- `contracts/` directory — frozen dataclass definitions
+- `contracts/` directory — immutable DTO definitions
 - `docs/dto_contracts.md` — DTO registry with fields, types, constraints
 
 ## Outputs

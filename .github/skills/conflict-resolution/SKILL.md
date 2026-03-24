@@ -1,6 +1,5 @@
 ---
 name: conflict-resolution
-type: skill
 description: "Git merge conflict resolution for parallel development. Use when resolving merge conflicts between parallel phase branches. Provides union-merge strategy, file ownership rules, and resolution patterns."
 ---
 
