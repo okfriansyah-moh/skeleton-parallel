@@ -595,10 +595,107 @@ Do NOT modify any other project files." \
 # ═════════════════════════════════════════════════════════════════════════════
 # COMMAND: upgrade
 # ═════════════════════════════════════════════════════════════════════════════
+# ── Preview what an upgrade mode will change (dry-run, no writes) ────────
+_upgrade_preview() {
+    local target_dir="$1"
+    local upgrade_mode="$2"
+
+    echo ""
+    log_step "Preview — changes that will be applied (${BOLD}${upgrade_mode}${NC} mode):"
+    echo ""
+
+    local skills_count
+    skills_count="$(get_available_skills | wc -l | tr -d ' ')"
+    local agents_count
+    agents_count="$(get_available_agents | wc -l | tr -d ' ')"
+
+    case "${upgrade_mode}" in
+        replace)
+            echo -e "  ${RED}[replace]${NC}  .github/skills/        (${skills_count} skills — all overwritten)"
+            echo -e "  ${RED}[replace]${NC}  .github/agents/        (${agents_count} agents — all overwritten)"
+            echo -e "  ${RED}[replace]${NC}  .github/prompts/"
+            echo -e "  ${RED}[replace]${NC}  .github/copilot-instructions.md"
+            echo -e "  ${RED}[replace]${NC}  scripts/run_parallel.sh"
+            echo -e "  ${RED}[replace]${NC}  config/phases.yaml"
+            for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+                       dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+                       AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+                echo -e "  ${RED}[replace]${NC}  docs/${doc}"
+            done
+            ;;
+        hybrid)
+            echo -e "  ${GREEN}[update]${NC}   .github/skills/        (${skills_count} skills — always synced)"
+            echo -e "  ${GREEN}[update]${NC}   .github/agents/        (${agents_count} agents — always synced)"
+            echo -e "  ${GREEN}[update]${NC}   .github/prompts/       (always synced)"
+            echo -e "  ${GREEN}[update]${NC}   scripts/run_parallel.sh"
+            if [[ -f "${target_dir}/.github/copilot-instructions.md" ]]; then
+                echo -e "  ${CYAN}[preserve]${NC} .github/copilot-instructions.md (exists — kept as-is)"
+            else
+                echo -e "  ${GREEN}[install]${NC}  .github/copilot-instructions.md (missing — will install)"
+            fi
+            if [[ -f "${target_dir}/config/phases.yaml" ]]; then
+                echo -e "  ${CYAN}[preserve]${NC} config/phases.yaml (exists — kept as-is)"
+            else
+                echo -e "  ${GREEN}[install]${NC}  config/phases.yaml (missing — will install)"
+            fi
+            for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+                       dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+                       AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+                if [[ -f "${target_dir}/docs/${doc}" ]]; then
+                    echo -e "  ${CYAN}[preserve]${NC} docs/${doc} (exists — kept as-is)"
+                else
+                    echo -e "  ${GREEN}[install]${NC}  docs/${doc} (missing — will install)"
+                fi
+            done
+            ;;
+        skip)
+            for item in ".github/skills" ".github/agents" ".github/prompts"; do
+                if [[ -d "${target_dir}/${item}" ]]; then
+                    echo -e "  ${YELLOW}[skip]${NC}     ${item}/ (exists — no changes)"
+                else
+                    echo -e "  ${GREEN}[install]${NC}  ${item}/ (missing — will install)"
+                fi
+            done
+            if [[ -f "${target_dir}/.github/copilot-instructions.md" ]]; then
+                echo -e "  ${YELLOW}[skip]${NC}     .github/copilot-instructions.md (exists — no changes)"
+            else
+                echo -e "  ${GREEN}[install]${NC}  .github/copilot-instructions.md (missing — will install)"
+            fi
+            if [[ -f "${target_dir}/scripts/run_parallel.sh" ]]; then
+                echo -e "  ${YELLOW}[skip]${NC}     scripts/run_parallel.sh (exists — no changes)"
+            else
+                echo -e "  ${GREEN}[install]${NC}  scripts/run_parallel.sh (missing — will install)"
+            fi
+            if [[ -f "${target_dir}/config/phases.yaml" ]]; then
+                echo -e "  ${YELLOW}[skip]${NC}     config/phases.yaml (exists — no changes)"
+            else
+                echo -e "  ${GREEN}[install]${NC}  config/phases.yaml (missing — will install)"
+            fi
+            for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+                       dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+                       AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+                if [[ -f "${target_dir}/docs/${doc}" ]]; then
+                    echo -e "  ${YELLOW}[skip]${NC}     docs/${doc} (exists — no changes)"
+                else
+                    echo -e "  ${GREEN}[install]${NC}  docs/${doc} (missing — will install)"
+                fi
+            done
+            ;;
+    esac
+    echo ""
+    echo -e "  ${GREEN}[update]${NC}   = overwrite with latest skeleton version"
+    echo -e "  ${GREEN}[install]${NC}  = copy from skeleton (file does not exist yet)"
+    echo -e "  ${CYAN}[preserve]${NC} = keep your existing file unchanged"
+    echo -e "  ${RED}[replace]${NC}  = remove existing and install fresh skeleton version"
+    echo -e "  ${YELLOW}[skip]${NC}     = file exists, no action taken"
+    echo ""
+}
+
 cmd_upgrade() {
     local target_dir="."
     local force_mode=""
     local no_analyze=false
+    local auto_yes=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -607,6 +704,7 @@ cmd_upgrade() {
             --mode=*)     force_mode="${1#*=}"; shift ;;
             --no-agent)   SKIP_AGENT=true; shift ;;
             --no-analyze) no_analyze=true; shift ;;
+            -y|--yes)     auto_yes=true; shift ;;
             -*)           die "Unknown option: $1" ;;
             *)            target_dir="$1"; shift ;;
         esac
@@ -685,7 +783,21 @@ cmd_upgrade() {
     fi
     echo ""
 
-    # ── Step 2: Apply upgrade based on mode ───────────────────────────────
+    # ── Step 2: Preview changes + confirm before writing anything ─────────
+    _upgrade_preview "${target_dir}" "${upgrade_mode}"
+
+    if [[ "${auto_yes}" != true ]]; then
+        printf "%b" "${BOLD}Apply these changes? [y/N]: ${NC}"
+        read -r proceed_choice
+        echo ""
+        if [[ "${proceed_choice,,}" != "y" && "${proceed_choice,,}" != "yes" ]]; then
+            log_info "Aborted. No files were modified."
+            echo ""
+            return 0
+        fi
+    fi
+
+    # ── Step 3: Apply upgrade based on mode ───────────────────────────────
     case "${upgrade_mode}" in
         replace)
             _upgrade_replace "${target_dir}"
