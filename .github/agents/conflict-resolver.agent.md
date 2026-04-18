@@ -15,6 +15,10 @@ You are a merge conflict resolution specialist for parallel development branches
 - `.github/skills/dto/SKILL.md` — DTO definitions for combining contracts
 - `.github/skills/pipeline/SKILL.md` — stage ordering for orchestrator wiring
 - `.github/skills/modularity/SKILL.md` — module boundaries and import rules
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 
 ## Responsibilities
 

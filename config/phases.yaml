@@ -11,6 +11,14 @@
 #   complexity — Score 1-10 (highest gets the heavy model in parallel mode)
 #   group      — Letter A-Z (phases in the same group run sequentially)
 #   skills     — Comma-separated skill names required for this phase
+#               All 28 available skills: dto, pipeline, modularity, determinism,
+#               idempotency, failure, config-validation, code-quality,
+#               coding-standards, database-portability, docs-sync,
+#               conflict-resolution, token-optimization, running-prompt,
+#               security-audit, test-generation, vertical-slice, api-design,
+#               project-scaffold, dependency-analysis, migration-management,
+#               performance-optimization, caveman, brainstorming, writing-plans,
+#               subagent-driven-development, test-driven-development, rtk
 # ─────────────────────────────────────────────────────────────────────────────
 
 phases:
@@ -18,14 +26,14 @@ phases:
     name: "core-infrastructure"
     complexity: 8
     group: "A"
-    skills: "idempotency, failure"
+    skills: "idempotency, failure, database-portability, config-validation, modularity, migration-management"
   # 1:
   #   name: "stage-name"
   #   complexity: 5
   #   group: "B"
-  #   skills: "dto, modularity, determinism"
+  #   skills: "dto, modularity, determinism, idempotency, config-validation"
   # 2:
   #   name: "another-stage"
   #   complexity: 6
   #   group: "B"
-  #   skills: "dto, modularity, determinism"
+  #   skills: "dto, modularity, determinism, api-design, test-generation"

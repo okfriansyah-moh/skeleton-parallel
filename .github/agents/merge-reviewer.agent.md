@@ -28,6 +28,14 @@ You are a post-merge review specialist. Your job is to validate the merged codeb
 - `.github/skills/database-portability/SKILL.md` — verify no engine-specific code
 - `.github/skills/docs-sync/SKILL.md` — verify code matches specifications
 - `.github/skills/code-quality/SKILL.md` — verify production-readiness
+- `.github/skills/coding-standards/SKILL.md` — naming, function design, language idioms
+- `.github/skills/subagent-driven-development/SKILL.md` — structured review per task
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
+- `.github/skills/coding-standards/SKILL.md` — naming, function design, language idioms
+- `.github/skills/subagent-driven-development/SKILL.md` — structured review per task
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 
 ## Responsibilities
 

@@ -1,0 +1,10 @@
+# Java template additions
+target/
+*.class
+*.jar
+*.war
+*.ear
+.idea/
+*.iml
+.gradle/
+build/

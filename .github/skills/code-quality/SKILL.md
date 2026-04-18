@@ -1,6 +1,6 @@
 ---
 name: code-quality
-description: "Code quality enforcement. Use when reviewing code for style, type annotations, logging standards, and best practices. Ensures production-ready code with proper typing, structured logging, and no anti-patterns."
+description: "Code quality enforcement. Use when reviewing code for style, type annotations, logging standards, and best practices. Ensures production-ready code with proper typing, structured logging, and no anti-patterns. For detailed naming, function design, and language idioms, see the coding-standards skill."
 ---
 
 # Code Quality Skill
@@ -8,6 +8,8 @@ description: "Code quality enforcement. Use when reviewing code for style, type 
 ## Purpose
 
 Enforce production-ready code standards: type annotations on all public interfaces, structured logging (language-appropriate), no unstructured console output, and adherence to the project's language best practices.
+
+> **For detailed naming conventions, function design rules, error handling patterns, and language-specific idioms, see `coding-standards` skill.** This skill focuses on the enforcement checklist and anti-pattern detection.
 
 ## Rules
 
@@ -55,7 +57,7 @@ from os import *
 
 ## Outputs
 
-- Code that passes linting (ruff/flake8)
+- Code that passes linting
 - Properly typed public interfaces
 - Structured logging throughout
 
@@ -96,3 +98,6 @@ def compute_score(
 - [ ] No wildcard imports
 - [ ] Structured logging with contextual fields
 - [ ] Modern language syntax used per project's minimum version
+- [ ] Follows naming conventions per `coding-standards` skill
+- [ ] Functions under 30 lines per `coding-standards` skill
+- [ ] No code smells per `coding-standards` § Code Smells to Reject

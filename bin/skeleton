@@ -1,0 +1,1494 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# skeleton — CLI for the skeleton-parallel framework
+# ─────────────────────────────────────────────────────────────────────────────
+# Initialize, upgrade, and manage projects using the skeleton-parallel
+# modular monolith framework with AI-assisted parallel development.
+#
+# Usage:
+#   skeleton init <language> [--name=NAME] [--dir=DIR]
+#   skeleton upgrade [--dir=DIR]
+#   skeleton doctor [--dir=DIR]
+#   skeleton add skill <name> [--dir=DIR]
+#   skeleton add agent <name> [--dir=DIR]
+#   skeleton list [skills|agents|templates]
+#   skeleton sync [--dir=DIR]
+#   skeleton version
+#   skeleton help
+#
+# Supported languages: go, python, typescript, nodejs, rust, java
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+VERSION="1.1.0"
+
+# ── Resolve skeleton-parallel root ───────────────────────────────────────────
+SKELETON_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKELETON_ROOT="$(cd "${SKELETON_BIN}/.." && pwd)"
+TEMPLATES_DIR="${SKELETON_ROOT}/templates"
+
+# ── Copilot Agent Configuration ─────────────────────────────────────────────
+COPILOT_MODEL="${COPILOT_MODEL:-claude-sonnet-4.6}"
+COPILOT_LOG_DIR=".parallel-dev/agent-logs"
+# All 28 skills — injected into every agent prompt
+COPILOT_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, writing-plans, subagent-driven-development, test-driven-development, rtk"
+# Workspace constraint — prevent agents from writing outside project
+COPILOT_WORKSPACE_CONSTRAINT="WORKSPACE CONSTRAINT: NEVER write files outside this project directory. Use .parallel-dev/ for temporary artifacts and output/ for generated files."
+
+# ── Colors ───────────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+log_info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
+log_ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+log_step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+die() { log_error "$@"; exit 1; }
+
+confirm() {
+    local prompt="${1:-Continue?}"
+    read -rp "$(echo -e "${YELLOW}${prompt} [y/N]${NC} ")" answer
+    [[ "${answer}" =~ ^[Yy]$ ]]
+}
+
+# Escape a string for safe use in sed replacement patterns
+# Handles /, &, \, and newlines
+_sed_escape() {
+    printf '%s' "$1" | sed -e 's/[\/&\\]/\\&/g'
+}
+
+# Validate project name — only allow safe characters
+_validate_project_name() {
+    local name="$1"
+    if [[ ${#name} -gt 255 ]]; then
+        die "Project name too long (max 255 chars)"
+    fi
+    if [[ ! "${name}" =~ ^[a-zA-Z][a-zA-Z0-9._-]*$ ]]; then
+        die "Invalid project name '${name}'. Must start with a letter, contain only [a-zA-Z0-9._-]"
+    fi
+}
+
+# ── Copilot Agent Helpers ────────────────────────────────────────────────────
+
+# Check if Copilot CLI is available — required for agent-first workflow
+_check_copilot_available() {
+    if command -v copilot &>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# Require Copilot CLI — die if not found
+_require_copilot() {
+    if ! _check_copilot_available; then
+        die "Copilot CLI is required. Install with: npm install -g @githubnext/github-copilot-cli\nAlternative: use --no-agent to skip agent validation."
+    fi
+}
+
+# Spawn a Copilot agent in foreground (blocking — waits for completion)
+# Usage: _spawn_copilot_agent <work_dir> <agent_name> <prompt> [log_label]
+_spawn_copilot_agent() {
+    local work_dir="$1"
+    local agent_name="$2"
+    local prompt="$3"
+    local log_label="${4:-${agent_name}}"
+
+    if [[ "${SKIP_AGENT:-false}" == "true" ]]; then
+        log_info "Agent spawning skipped (--no-agent)"
+        return 0
+    fi
+
+    _require_copilot
+
+    local log_dir="${work_dir}/${COPILOT_LOG_DIR}"
+    mkdir -p "${log_dir}"
+    local log_file="${log_dir}/${log_label}-$(date +%Y%m%d-%H%M%S).log"
+
+    log_step "Spawning agent: ${BOLD}${agent_name}${NC} (model: ${COPILOT_MODEL})"
+
+    (
+        cd "${work_dir}"
+        copilot \
+            -p "${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow all constraints in .github/copilot-instructions.md. ${COPILOT_WORKSPACE_CONSTRAINT}" \
+            --agent="${agent_name}" \
+            --model="${COPILOT_MODEL}" \
+            --no-ask-user \
+            --allow-all-tools \
+            --autopilot \
+            2>&1 | tee "${log_file}"
+    )
+    local exit_code=${PIPESTATUS[0]:-$?}
+
+    if [[ ${exit_code} -eq 0 ]]; then
+        log_ok "Agent ${agent_name} completed successfully"
+    else
+        log_error "Agent ${agent_name} failed (exit ${exit_code}). Log: ${log_file}"
+    fi
+    return ${exit_code}
+}
+
+# Spawn a Copilot agent in background (non-blocking — returns immediately)
+# Usage: _spawn_copilot_agent_bg <work_dir> <agent_name> <prompt> [log_label]
+_spawn_copilot_agent_bg() {
+    local work_dir="$1"
+    local agent_name="$2"
+    local prompt="$3"
+    local log_label="${4:-${agent_name}}"
+
+    if [[ "${SKIP_AGENT:-false}" == "true" ]]; then
+        return 0
+    fi
+
+    if ! _check_copilot_available; then
+        log_warn "Copilot CLI not found — skipping background agent"
+        return 0
+    fi
+
+    local log_dir="${work_dir}/${COPILOT_LOG_DIR}"
+    mkdir -p "${log_dir}"
+    local log_file="${log_dir}/${log_label}-$(date +%Y%m%d-%H%M%S).log"
+
+    log_info "Spawning background agent: ${agent_name} (log: ${log_file})"
+
+    (
+        cd "${work_dir}"
+        copilot \
+            -p "${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow all constraints in .github/copilot-instructions.md. ${COPILOT_WORKSPACE_CONSTRAINT}" \
+            --agent="${agent_name}" \
+            --model="${COPILOT_MODEL}" \
+            --no-ask-user \
+            --allow-all-tools \
+            --autopilot \
+            &>"${log_file}"
+    ) &
+    local bg_pid=$!
+    log_info "Background agent PID: ${bg_pid}"
+}
+
+# Detect existing skeleton-parallel mechanisms in a directory
+# Returns space-separated list of found mechanisms
+_detect_existing_mechanisms() {
+    local dir="$1"
+    local found=()
+
+    [[ -f "${dir}/.github/copilot-instructions.md" ]] && found+=("copilot-instructions")
+    [[ -d "${dir}/.github/skills" ]] && found+=("skills")
+    [[ -d "${dir}/.github/agents" ]] && found+=("agents")
+    [[ -d "${dir}/.github/prompts" ]] && found+=("prompts")
+    [[ -f "${dir}/scripts/run_parallel.sh" ]] && found+=("run_parallel")
+    [[ -f "${dir}/config/phases.yaml" ]] && found+=("phases_config")
+
+    # Check for spec docs
+    for doc in architecture.md implementation_roadmap.md orchestrator_spec.md dto_contracts.md db_adapter_spec.md; do
+        if [[ -f "${dir}/docs/${doc}" ]]; then
+            found+=("docs_templates")
+            break
+        fi
+    done
+
+    echo "${found[*]}"
+}
+
+# Prompt user for upgrade mode when existing mechanisms are detected
+# Returns: "replace", "hybrid", or "skip"
+_prompt_upgrade_mode() {
+    local dir="$1"
+    local mechanisms="$2"
+
+    echo ""
+    log_warn "Existing skeleton-parallel mechanisms detected:"
+    for mech in ${mechanisms}; do
+        echo -e "    ${YELLOW}●${NC} ${mech}"
+    done
+    echo ""
+    echo -e "${BOLD}Choose upgrade mode:${NC}"
+    echo -e "  ${GREEN}[R]eplace${NC}  — Remove existing mechanisms, install fresh from skeleton-parallel"
+    echo -e "  ${CYAN}[H]ybrid${NC}   — Merge additively (add missing, preserve existing custom files)"
+    echo -e "  ${YELLOW}[S]kip${NC}     — Don't touch existing mechanisms, install only new components"
+    echo ""
+    read -rp "$(echo -e "${BOLD}Mode [R/H/S]: ${NC}")" mode_choice
+    case "${mode_choice,,}" in
+        r|replace)  echo "replace" ;;
+        h|hybrid)   echo "hybrid" ;;
+        s|skip)     echo "skip" ;;
+        *)          echo "hybrid" ;;  # Default to hybrid (safest)
+    esac
+}
+
+# Substitute template placeholders in a file
+# Usage: substitute_placeholders <file> <project_name> <module_name>
+substitute_placeholders() {
+    local file="$1"
+    local project_name="$2"
+    local module_name="${3:-app}"
+
+    # Derive common names
+    local project_snake
+    project_snake="$(echo "${project_name}" | tr '-' '_' | tr '[:upper:]' '[:lower:]')"
+    local project_pascal
+    project_pascal="$(echo "${project_name}" | sed -E 's/(^|[-_ ])([a-z])/\U\2/g')"
+
+    # Escape all values for safe sed usage
+    local esc_name esc_snake esc_pascal esc_module esc_year
+    esc_name="$(_sed_escape "${project_name}")"
+    esc_snake="$(_sed_escape "${project_snake}")"
+    esc_pascal="$(_sed_escape "${project_pascal}")"
+    esc_module="$(_sed_escape "${module_name}")"
+    esc_year="$(date +%Y)"
+
+    if [[ -f "${file}" ]]; then
+        sed -i.bak \
+            -e "s/{{PROJECT_NAME}}/${esc_name}/g" \
+            -e "s/{{PROJECT_SNAKE}}/${esc_snake}/g" \
+            -e "s/{{PROJECT_PASCAL}}/${esc_pascal}/g" \
+            -e "s/{{MODULE_NAME}}/${esc_module}/g" \
+            -e "s/{{YEAR}}/${esc_year}/g" \
+            -e "s|example\.com/myapp|${esc_name}|g" \
+            "${file}"
+        rm -f "${file}.bak"
+    fi
+}
+
+# Recursively substitute placeholders in all files in a directory
+substitute_all() {
+    local dir="$1"
+    local project_name="$2"
+    local module_name="${3:-app}"
+
+    find "${dir}" -type f \( -name '*.go' -o -name '*.py' -o -name '*.ts' -o -name '*.js' \
+        -o -name '*.rs' -o -name '*.java' -o -name '*.md' -o -name '*.yaml' -o -name '*.yml' \
+        -o -name '*.json' -o -name '*.toml' -o -name '*.mod' -o -name '*.xml' \
+        -o -name 'Makefile' -o -name '*.txt' -o -name '*.cfg' -o -name '*.sh' \) | while read -r f; do
+        substitute_placeholders "${f}" "${project_name}" "${module_name}"
+    done
+}
+
+# ── Available resources ──────────────────────────────────────────────────────
+SUPPORTED_LANGUAGES=("go" "python" "typescript" "nodejs" "rust" "java")
+
+get_available_skills() {
+    local skills_dir="${SKELETON_ROOT}/.github/skills"
+    if [[ -d "${skills_dir}" ]]; then
+        find "${skills_dir}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort
+    fi
+}
+
+get_available_agents() {
+    local agents_dir="${SKELETON_ROOT}/.github/agents"
+    if [[ -d "${agents_dir}" ]]; then
+        find "${agents_dir}" -name '*.agent.md' -exec basename {} .agent.md \; | sort
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: init
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_init() {
+    local language=""
+    local project_name=""
+    local target_dir=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name=*) project_name="${1#*=}"; shift ;;
+            --dir=*)  target_dir="${1#*=}"; shift ;;
+            --name)   project_name="${2}"; shift 2 ;;
+            --dir)    target_dir="${2}"; shift 2 ;;
+            --no-agent) SKIP_AGENT=true; shift ;;
+            -*)       die "Unknown option: $1" ;;
+            *)
+                if [[ -z "${language}" ]]; then
+                    language="$1"
+                else
+                    die "Unexpected argument: $1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # Validate language
+    if [[ -z "${language}" ]]; then
+        die "Usage: skeleton init <language> [--name=NAME] [--dir=DIR]\nSupported: ${SUPPORTED_LANGUAGES[*]}"
+    fi
+
+    local lang_found=false
+    for l in "${SUPPORTED_LANGUAGES[@]}"; do
+        [[ "${language}" == "${l}" ]] && lang_found=true
+    done
+    if ! ${lang_found}; then
+        die "Unsupported language: ${language}\nSupported: ${SUPPORTED_LANGUAGES[*]}"
+    fi
+
+    # Default project name from current directory
+    if [[ -z "${project_name}" ]]; then
+        if [[ -n "${target_dir}" ]]; then
+            project_name="$(basename "${target_dir}")"
+        else
+            read -rp "$(echo -e "${CYAN}Project name: ${NC}")" project_name
+            [[ -z "${project_name}" ]] && die "Project name is required"
+        fi
+    fi
+
+    # Validate project name for safety
+    _validate_project_name "${project_name}"
+
+    # Default target directory
+    if [[ -z "${target_dir}" ]]; then
+        target_dir="./${project_name}"
+    fi
+
+    # Resolve absolute path
+    target_dir="$(cd "$(dirname "${target_dir}")" 2>/dev/null && pwd)/$(basename "${target_dir}")" || target_dir="$(pwd)/${project_name}"
+
+    echo ""
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  skeleton init                               ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    log_info "Language:     ${BOLD}${language}${NC}"
+    log_info "Project:      ${BOLD}${project_name}${NC}"
+    log_info "Directory:    ${BOLD}${target_dir}${NC}"
+    echo ""
+
+    if [[ -d "${target_dir}" ]]; then
+        local file_count
+        file_count="$(find "${target_dir}" -maxdepth 1 -not -name '.' | wc -l | tr -d ' ')"
+        if [[ "${file_count}" -gt 0 ]]; then
+            log_warn "Directory ${target_dir} already exists and is not empty."
+            confirm "Overwrite?" || die "Aborted."
+        fi
+    fi
+
+    mkdir -p "${target_dir}"
+
+    # ── Step 1: Copy common files ─────────────────────────────────────────
+    log_step "Copying common framework files..."
+    _copy_common "${target_dir}"
+
+    # ── Step 2: Copy language-specific template ───────────────────────────
+    log_step "Applying ${language} template..."
+    local lang_template="${TEMPLATES_DIR}/${language}"
+    if [[ -d "${lang_template}" ]]; then
+        cp -R "${lang_template}/." "${target_dir}/"
+    else
+        die "Template not found: ${lang_template}"
+    fi
+
+    # ── Step 3: Substitute placeholders ───────────────────────────────────
+    log_step "Customizing project files..."
+    substitute_all "${target_dir}" "${project_name}"
+
+    # ── Step 4: Initialize git ────────────────────────────────────────────
+    log_step "Initializing Git repository..."
+    (
+        cd "${target_dir}"
+        if [[ ! -d ".git" ]]; then
+            git init -q
+            git add -A
+            git commit -q -m "Initial commit: skeleton-parallel ${language} project (${project_name})"
+        fi
+    )
+
+    # ── Step 5: Post-init setup ───────────────────────────────────────────
+    log_step "Running post-init setup for ${language}..."
+    _post_init_setup "${language}" "${target_dir}" "${project_name}"
+
+    # ── Step 6: Spawn Copilot agent for project validation ────────────────
+    log_step "Spawning Copilot agent for project validation..."
+    _spawn_copilot_agent "${target_dir}" "scaffold" \
+        "You are validating a newly initialized ${language} project named '${project_name}'. Perform a complete validation: 1) All docs/ templates exist (architecture.md, dto_contracts.md, orchestrator_spec.md, db_adapter_spec.md, implementation_roadmap.md, PARALLEL_DEV.md, AGENTS_AND_SKILLS.md, STARTER_GUIDE.md, PROGRESS_REPORT.md). 2) config/phases.yaml is present and properly structured. 3) scripts/run_parallel.sh is present and executable. 4) .github/ has all 28 skills, 14 agents, 5 prompts, and copilot-instructions.md. 5) Language-specific structure (${language}) matches skeleton-parallel modular monolith standards — contracts/ for DTOs, database/ for adapter, app/modules/ or src/modules/ for domain modules. 6) Health module reference implementation exists and is properly wired. 7) Ensure the project can seamlessly run parallel development via run_parallel.sh. Fix any issues found. After fixing, commit changes with message 'chore: post-init validation fixes'." \
+        "init-validation"
+
+    echo ""
+    log_ok "Project ${BOLD}${project_name}${NC} initialized successfully!"
+    echo ""
+    echo -e "  ${CYAN}Next steps:${NC}"
+    echo -e "    cd ${target_dir}"
+    echo -e "    # Generate architecture:  @workspace Use .github/prompts/architecture.prompt.md"
+    echo -e "    # Generate roadmap:       @workspace Use .github/prompts/roadmap.prompt.md"
+    echo -e "    # Run doctor:             skeleton doctor"
+    echo -e "    # Start parallel dev:     ./scripts/run_parallel.sh start --mode=3 1 2 3"
+    echo ""
+}
+
+_copy_common() {
+    local dest="$1"
+
+    # .github directory (skills, agents, prompts, copilot-instructions)
+    mkdir -p "${dest}/.github"
+    if [[ -d "${SKELETON_ROOT}/.github/skills" ]]; then
+        cp -R "${SKELETON_ROOT}/.github/skills" "${dest}/.github/"
+    fi
+    if [[ -d "${SKELETON_ROOT}/.github/agents" ]]; then
+        cp -R "${SKELETON_ROOT}/.github/agents" "${dest}/.github/"
+    fi
+    if [[ -d "${SKELETON_ROOT}/.github/prompts" ]]; then
+        cp -R "${SKELETON_ROOT}/.github/prompts" "${dest}/.github/"
+    fi
+    if [[ -f "${SKELETON_ROOT}/.github/copilot-instructions.md" ]]; then
+        cp "${SKELETON_ROOT}/.github/copilot-instructions.md" "${dest}/.github/"
+    fi
+
+    # Scripts
+    mkdir -p "${dest}/scripts"
+    if [[ -f "${SKELETON_ROOT}/scripts/run_parallel.sh" ]]; then
+        cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${dest}/scripts/"
+        chmod +x "${dest}/scripts/run_parallel.sh"
+    fi
+
+    # Config
+    mkdir -p "${dest}/config"
+    if [[ -f "${SKELETON_ROOT}/config/phases.yaml" ]]; then
+        cp "${SKELETON_ROOT}/config/phases.yaml" "${dest}/config/"
+    fi
+
+    # Docs templates
+    mkdir -p "${dest}/docs"
+    for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+               dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+               AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+        if [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
+            cp "${SKELETON_ROOT}/docs/${doc}" "${dest}/docs/"
+        fi
+    done
+
+    # Output directory
+    mkdir -p "${dest}/output"
+    echo '*' > "${dest}/output/.gitignore"
+}
+
+_post_init_setup() {
+    local language="$1"
+    local target_dir="$2"
+    local project_name="$3"
+
+    case "${language}" in
+        go)
+            log_info "Tip: Run 'go mod tidy' to install dependencies."
+            ;;
+        python)
+            log_info "Tip: Run 'python -m venv .venv && pip install -r requirements.txt' to set up."
+            ;;
+        typescript)
+            log_info "Tip: Run 'npm install' to install dependencies."
+            ;;
+        nodejs)
+            log_info "Tip: Run 'npm install' to install dependencies, then 'npm test' to run tests."
+            ;;
+        rust)
+            log_info "Tip: Run 'cargo build' to compile the project."
+            ;;
+        java)
+            log_info "Tip: Run 'mvn compile' or 'gradle build' to compile."
+            ;;
+    esac
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: upgrade
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_upgrade() {
+    local target_dir="."
+    local force_mode=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir=*)      target_dir="${1#*=}"; shift ;;
+            --dir)        target_dir="${2}"; shift 2 ;;
+            --mode=*)     force_mode="${1#*=}"; shift ;;
+            --no-agent)   SKIP_AGENT=true; shift ;;
+            -*)           die "Unknown option: $1" ;;
+            *)            target_dir="$1"; shift ;;
+        esac
+    done
+
+    target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+
+    echo ""
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  skeleton upgrade                            ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    log_info "Target: ${BOLD}${target_dir}${NC}"
+    echo ""
+
+    # ── Step 1: Detect existing mechanisms ────────────────────────────────
+    log_step "Detecting existing skeleton-parallel mechanisms..."
+    local existing_mechanisms
+    existing_mechanisms="$(_detect_existing_mechanisms "${target_dir}")"
+
+    local upgrade_mode="replace"
+    if [[ -n "${existing_mechanisms}" ]]; then
+        if [[ -n "${force_mode}" ]]; then
+            upgrade_mode="${force_mode}"
+            log_info "Using forced mode: ${upgrade_mode}"
+        else
+            upgrade_mode="$(_prompt_upgrade_mode "${target_dir}" "${existing_mechanisms}")"
+        fi
+        log_info "Upgrade mode: ${BOLD}${upgrade_mode}${NC}"
+    else
+        log_ok "No existing mechanisms found — full install"
+    fi
+    echo ""
+
+    # ── Step 2: Apply upgrade based on mode ───────────────────────────────
+    case "${upgrade_mode}" in
+        replace)
+            _upgrade_replace "${target_dir}"
+            ;;
+        hybrid)
+            _upgrade_hybrid "${target_dir}"
+            ;;
+        skip)
+            _upgrade_skip "${target_dir}"
+            ;;
+    esac
+
+    # ── Step 3: Auto-detect language ──────────────────────────────────────
+    log_step "Detecting project language..."
+    local detected_lang
+    detected_lang="$(_detect_language "${target_dir}")"
+    if [[ -n "${detected_lang}" ]]; then
+        log_ok "Detected language: ${BOLD}${detected_lang}${NC}"
+    else
+        log_warn "Could not auto-detect language. Structure validation skipped."
+    fi
+
+    # ── Step 4: Spawn agent for validation ────────────────────────────────
+    log_step "Spawning Copilot agent for post-upgrade validation..."
+    _spawn_copilot_agent "${target_dir}" "doctor" \
+        "You are validating an upgraded project. Check: 1) All skills/agents/prompts are installed and valid. 2) run_parallel.sh is executable and current. 3) copilot-instructions.md is present. 4) phases.yaml is configured. 5) Project structure follows skeleton-parallel standards for ${detected_lang:-unknown} language. 6) All docs templates are present. Fix any issues found. After fixing, commit changes with message 'chore: post-upgrade validation fixes'." \
+        "upgrade-validation"
+
+    echo ""
+    log_ok "Upgrade complete!"
+    echo ""
+    echo -e "  ${CYAN}Next steps:${NC}"
+    echo -e "    skeleton doctor --dir=${target_dir}"
+    echo -e "    # Review and customize .github/copilot-instructions.md"
+    echo -e "    # Configure config/phases.yaml for your phases"
+    echo ""
+}
+
+# ── Upgrade mode: Replace ─────────────────────────────────────────────────
+# Remove existing mechanisms, install fresh from skeleton-parallel
+_upgrade_replace() {
+    local target_dir="$1"
+
+    log_step "Mode: REPLACE — Installing fresh skeleton-parallel mechanisms..."
+
+    # Remove existing and reinstall
+    log_step "Upgrading .github/ (skills, agents, prompts, instructions)..."
+    mkdir -p "${target_dir}/.github"
+
+    # Force overwrite all .github components
+    [[ -d "${target_dir}/.github/skills" ]] && rm -rf "${target_dir}/.github/skills"
+    [[ -d "${target_dir}/.github/agents" ]] && rm -rf "${target_dir}/.github/agents"
+    [[ -d "${target_dir}/.github/prompts" ]] && rm -rf "${target_dir}/.github/prompts"
+
+    cp -R "${SKELETON_ROOT}/.github/skills" "${target_dir}/.github/"
+    log_ok "Skills replaced ($(get_available_skills | wc -l | tr -d ' ') skills)"
+    cp -R "${SKELETON_ROOT}/.github/agents" "${target_dir}/.github/"
+    log_ok "Agents replaced ($(get_available_agents | wc -l | tr -d ' ') agents)"
+    [[ -d "${SKELETON_ROOT}/.github/prompts" ]] && cp -R "${SKELETON_ROOT}/.github/prompts" "${target_dir}/.github/"
+    log_ok "Prompts replaced"
+
+    # Force overwrite copilot-instructions
+    cp "${SKELETON_ROOT}/.github/copilot-instructions.md" "${target_dir}/.github/"
+    log_ok "copilot-instructions.md replaced"
+
+    # Scripts — force overwrite
+    log_step "Replacing scripts/..."
+    mkdir -p "${target_dir}/scripts"
+    cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${target_dir}/scripts/"
+    chmod +x "${target_dir}/scripts/run_parallel.sh"
+    log_ok "run_parallel.sh replaced"
+
+    # Config — force overwrite
+    log_step "Replacing config/..."
+    mkdir -p "${target_dir}/config"
+    cp "${SKELETON_ROOT}/config/phases.yaml" "${target_dir}/config/"
+    log_ok "phases.yaml replaced"
+
+    # Docs — install all templates (overwrite existing)
+    log_step "Replacing doc templates..."
+    mkdir -p "${target_dir}/docs"
+    local docs_installed=0
+    for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+               dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+               AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+        if [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
+            cp "${SKELETON_ROOT}/docs/${doc}" "${target_dir}/docs/"
+            ((docs_installed++))
+        fi
+    done
+    log_ok "Installed ${docs_installed} doc templates"
+
+    # Output directory
+    mkdir -p "${target_dir}/output"
+    [[ ! -f "${target_dir}/output/.gitignore" ]] && echo '*' > "${target_dir}/output/.gitignore"
+}
+
+# ── Upgrade mode: Hybrid ──────────────────────────────────────────────────
+# Merge additively — add missing components, preserve existing custom files
+_upgrade_hybrid() {
+    local target_dir="$1"
+
+    log_step "Mode: HYBRID — Merging additively (preserving custom files)..."
+
+    # .github — always update skills and agents (these should be current)
+    log_step "Upgrading .github/ (skills, agents, prompts)..."
+    mkdir -p "${target_dir}/.github"
+
+    if [[ -d "${SKELETON_ROOT}/.github/skills" ]]; then
+        cp -R "${SKELETON_ROOT}/.github/skills" "${target_dir}/.github/"
+        log_ok "Skills updated ($(get_available_skills | wc -l | tr -d ' ') skills)"
+    fi
+    if [[ -d "${SKELETON_ROOT}/.github/agents" ]]; then
+        cp -R "${SKELETON_ROOT}/.github/agents" "${target_dir}/.github/"
+        log_ok "Agents updated ($(get_available_agents | wc -l | tr -d ' ') agents)"
+    fi
+    if [[ -d "${SKELETON_ROOT}/.github/prompts" ]]; then
+        cp -R "${SKELETON_ROOT}/.github/prompts" "${target_dir}/.github/"
+        log_ok "Prompts updated"
+    fi
+
+    # Copilot instructions — preserve if exists
+    if [[ ! -f "${target_dir}/.github/copilot-instructions.md" ]]; then
+        cp "${SKELETON_ROOT}/.github/copilot-instructions.md" "${target_dir}/.github/"
+        log_ok "copilot-instructions.md installed"
+    else
+        log_warn "copilot-instructions.md exists — preserved (use 'skeleton sync' to force update)"
+    fi
+
+    # Scripts — always update (executable, not customized)
+    log_step "Upgrading scripts/..."
+    mkdir -p "${target_dir}/scripts"
+    cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${target_dir}/scripts/"
+    chmod +x "${target_dir}/scripts/run_parallel.sh"
+    log_ok "run_parallel.sh updated"
+
+    # Config — preserve existing, add missing
+    log_step "Upgrading config/..."
+    mkdir -p "${target_dir}/config"
+    if [[ ! -f "${target_dir}/config/phases.yaml" ]]; then
+        cp "${SKELETON_ROOT}/config/phases.yaml" "${target_dir}/config/"
+        log_ok "phases.yaml installed"
+    else
+        log_warn "phases.yaml exists — preserved"
+    fi
+
+    # Docs — only install missing
+    log_step "Installing missing doc templates..."
+    mkdir -p "${target_dir}/docs"
+    local docs_installed=0
+    for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+               dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+               AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+        if [[ ! -f "${target_dir}/docs/${doc}" ]] && [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
+            cp "${SKELETON_ROOT}/docs/${doc}" "${target_dir}/docs/"
+            ((docs_installed++))
+        fi
+    done
+    log_ok "Installed ${docs_installed} new doc templates"
+
+    # Output directory
+    mkdir -p "${target_dir}/output"
+    [[ ! -f "${target_dir}/output/.gitignore" ]] && echo '*' > "${target_dir}/output/.gitignore"
+}
+
+# ── Upgrade mode: Skip ────────────────────────────────────────────────────
+# Install only new components that don't exist yet
+_upgrade_skip() {
+    local target_dir="$1"
+
+    log_step "Mode: SKIP — Installing only new components..."
+
+    # .github — only add if directory doesn't exist
+    mkdir -p "${target_dir}/.github"
+
+    if [[ ! -d "${target_dir}/.github/skills" ]]; then
+        cp -R "${SKELETON_ROOT}/.github/skills" "${target_dir}/.github/"
+        log_ok "Skills installed (new)"
+    else
+        log_warn "Skills directory exists — skipped"
+    fi
+    if [[ ! -d "${target_dir}/.github/agents" ]]; then
+        cp -R "${SKELETON_ROOT}/.github/agents" "${target_dir}/.github/"
+        log_ok "Agents installed (new)"
+    else
+        log_warn "Agents directory exists — skipped"
+    fi
+    if [[ ! -d "${target_dir}/.github/prompts" ]]; then
+        [[ -d "${SKELETON_ROOT}/.github/prompts" ]] && cp -R "${SKELETON_ROOT}/.github/prompts" "${target_dir}/.github/"
+        log_ok "Prompts installed (new)"
+    else
+        log_warn "Prompts directory exists — skipped"
+    fi
+
+    if [[ ! -f "${target_dir}/.github/copilot-instructions.md" ]]; then
+        cp "${SKELETON_ROOT}/.github/copilot-instructions.md" "${target_dir}/.github/"
+        log_ok "copilot-instructions.md installed (new)"
+    else
+        log_warn "copilot-instructions.md exists — skipped"
+    fi
+
+    # Scripts — only if missing
+    if [[ ! -f "${target_dir}/scripts/run_parallel.sh" ]]; then
+        mkdir -p "${target_dir}/scripts"
+        cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${target_dir}/scripts/"
+        chmod +x "${target_dir}/scripts/run_parallel.sh"
+        log_ok "run_parallel.sh installed (new)"
+    else
+        log_warn "run_parallel.sh exists — skipped"
+    fi
+
+    # Config — only if missing
+    if [[ ! -f "${target_dir}/config/phases.yaml" ]]; then
+        mkdir -p "${target_dir}/config"
+        cp "${SKELETON_ROOT}/config/phases.yaml" "${target_dir}/config/"
+        log_ok "phases.yaml installed (new)"
+    else
+        log_warn "phases.yaml exists — skipped"
+    fi
+
+    # Docs — only missing
+    mkdir -p "${target_dir}/docs"
+    local docs_installed=0
+    for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+               dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+               AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+        if [[ ! -f "${target_dir}/docs/${doc}" ]] && [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
+            cp "${SKELETON_ROOT}/docs/${doc}" "${target_dir}/docs/"
+            ((docs_installed++))
+        fi
+    done
+    log_ok "Installed ${docs_installed} new doc templates"
+
+    # Output directory
+    mkdir -p "${target_dir}/output"
+    [[ ! -f "${target_dir}/output/.gitignore" ]] && echo '*' > "${target_dir}/output/.gitignore"
+}
+
+_detect_language() {
+    local dir="$1"
+    if [[ -f "${dir}/go.mod" ]]; then echo "go"
+    elif [[ -f "${dir}/pyproject.toml" ]] || [[ -f "${dir}/requirements.txt" ]] || [[ -f "${dir}/setup.py" ]]; then echo "python"
+    elif [[ -f "${dir}/package.json" ]] && [[ -f "${dir}/tsconfig.json" ]]; then echo "typescript"
+    elif [[ -f "${dir}/package.json" ]]; then echo "nodejs"
+    elif [[ -f "${dir}/Cargo.toml" ]]; then echo "rust"
+    elif [[ -f "${dir}/pom.xml" ]] || [[ -f "${dir}/build.gradle" ]]; then echo "java"
+    else echo ""
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: doctor
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_doctor() {
+    local target_dir="."
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir=*) target_dir="${1#*=}"; shift ;;
+            --dir)   target_dir="${2}"; shift 2 ;;
+            --no-agent) SKIP_AGENT=true; shift ;;
+            -*)      die "Unknown option: $1" ;;
+            *)       target_dir="$1"; shift ;;
+        esac
+    done
+
+    target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+
+    echo ""
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  skeleton doctor                             ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    log_info "Checking: ${BOLD}${target_dir}${NC}"
+    echo ""
+
+    local issues=0
+    local warnings=0
+
+    # ── Framework files ───────────────────────────────────────────────────
+    log_step "Checking framework files..."
+
+    _check_exists() {
+        local path="$1" label="$2" severity="${3:-error}"
+        if [[ -e "${target_dir}/${path}" ]]; then
+            log_ok "${label}"
+        elif [[ "${severity}" == "warn" ]]; then
+            log_warn "${label} — MISSING (optional)"
+            ((warnings++))
+        else
+            log_error "${label} — MISSING"
+            ((issues++))
+        fi
+    }
+
+    _check_exists ".github/copilot-instructions.md" "copilot-instructions.md"
+    _check_exists "scripts/run_parallel.sh" "run_parallel.sh"
+    _check_exists "config/phases.yaml" "phases.yaml"
+    _check_exists ".github/skills" "Skills directory"
+    _check_exists ".github/agents" "Agents directory"
+    _check_exists ".github/prompts" "Prompts directory" "warn"
+
+    # ── Skills inventory ──────────────────────────────────────────────────
+    echo ""
+    log_step "Checking skills..."
+    local core_skills=("dto" "pipeline" "modularity" "determinism" "idempotency"
+                       "failure" "config-validation" "code-quality" "coding-standards"
+                       "database-portability" "docs-sync" "conflict-resolution"
+                       "token-optimization" "running-prompt" "security-audit"
+                       "test-generation" "vertical-slice" "api-design"
+                       "project-scaffold" "dependency-analysis" "migration-management"
+                       "performance-optimization" "caveman" "brainstorming"
+                       "writing-plans" "subagent-driven-development"
+                       "test-driven-development" "rtk")
+    local skill_count=0
+    local missing_skills=()
+    for skill in "${core_skills[@]}"; do
+        if [[ -f "${target_dir}/.github/skills/${skill}/SKILL.md" ]]; then
+            ((skill_count++))
+        else
+            missing_skills+=("${skill}")
+        fi
+    done
+    log_ok "Skills present: ${skill_count}/${#core_skills[@]}"
+    if [[ ${#missing_skills[@]} -gt 0 ]]; then
+        log_warn "Missing skills: ${missing_skills[*]}"
+        ((warnings++))
+    fi
+
+    # ── Agents inventory ──────────────────────────────────────────────────
+    echo ""
+    log_step "Checking agents..."
+    local core_agents=("phase-builder" "dto-guardian" "integration" "refactor"
+                       "orchestrator" "module-builder" "conflict-resolver"
+                       "merge-reviewer" "task-sync" "scaffold" "security-auditor"
+                       "test-builder" "upgrade-manager" "doctor")
+    local agent_count=0
+    local missing_agents=()
+    for agent in "${core_agents[@]}"; do
+        if [[ -f "${target_dir}/.github/agents/${agent}.agent.md" ]]; then
+            ((agent_count++))
+        else
+            missing_agents+=("${agent}")
+        fi
+    done
+    log_ok "Agents present: ${agent_count}/${#core_agents[@]}"
+    if [[ ${#missing_agents[@]} -gt 0 ]]; then
+        log_warn "Missing agents: ${missing_agents[*]}"
+        ((warnings++))
+    fi
+
+    # ── Project structure ─────────────────────────────────────────────────
+    echo ""
+    log_step "Checking project structure..."
+    local detected_lang
+    detected_lang="$(_detect_language "${target_dir}")"
+    if [[ -n "${detected_lang}" ]]; then
+        log_ok "Language detected: ${detected_lang}"
+        _check_lang_structure "${detected_lang}" "${target_dir}"
+    else
+        log_warn "Could not detect project language"
+        ((warnings++))
+    fi
+
+    # ── Doc templates ─────────────────────────────────────────────────────
+    echo ""
+    log_step "Checking documentation..."
+    local doc_files=("architecture.md" "implementation_roadmap.md" "orchestrator_spec.md"
+                     "dto_contracts.md" "db_adapter_spec.md")
+    for doc in "${doc_files[@]}"; do
+        _check_exists "docs/${doc}" "docs/${doc}" "warn"
+    done
+
+    # ── Git health ────────────────────────────────────────────────────────
+    echo ""
+    log_step "Checking Git setup..."
+    if [[ -d "${target_dir}/.git" ]]; then
+        log_ok "Git repository initialized"
+    else
+        log_warn "Not a Git repository"
+        ((warnings++))
+    fi
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    echo ""
+    echo -e "${BOLD}────────────────────────────────────────────────${NC}"
+    if [[ ${issues} -eq 0 ]] && [[ ${warnings} -eq 0 ]]; then
+        log_ok "${BOLD}All checks passed!${NC}"
+    elif [[ ${issues} -eq 0 ]]; then
+        log_ok "${BOLD}No critical issues. ${warnings} warning(s).${NC}"
+    else
+        log_error "${BOLD}${issues} issue(s), ${warnings} warning(s).${NC}"
+    fi
+    echo ""
+
+    # ── Deep agent health check ───────────────────────────────────────────
+    if [[ ${issues} -gt 0 ]] || [[ ${warnings} -gt 0 ]]; then
+        log_step "Spawning Copilot agent for deep health check and auto-fix..."
+        _spawn_copilot_agent "${target_dir}" "doctor" \
+            "Run a deep health check on this project. Found ${issues} issues and ${warnings} warnings. Validate and fix: 1) All module boundaries (no cross-module imports). 2) DTO contracts are immutable and properly defined in contracts/. 3) Database adapter is the sole DB access point (no raw SQL in modules). 4) All config is YAML-driven (no hardcoded values in code). 5) Tests are deterministic and network-free. 6) All missing skills, agents, or prompts should be installed. 7) Missing docs templates should be created from skeleton-parallel defaults. Fix all issues found. After fixing, commit with message 'chore: doctor auto-fix'." \
+            "doctor-deep-check"
+    else
+        # Background validation even when checks pass
+        _spawn_copilot_agent_bg "${target_dir}" "doctor" \
+            "All basic checks passed. Run a deep validation: 1) Verify module boundaries. 2) Check DTO immutability. 3) Validate database adapter isolation. 4) Check for hardcoded config values. 5) Ensure parallel dev readiness (phases.yaml + run_parallel.sh). Report findings in .parallel-dev/agent-logs/." \
+            "doctor-bg-validation"
+    fi
+
+    return ${issues}
+}
+
+_check_lang_structure() {
+    local lang="$1" dir="$2"
+
+    case "${lang}" in
+        go)
+            _check_exists "cmd" "cmd/ (entry points)" "warn"
+            _check_exists "internal/modules" "internal/modules/ (domain modules)" "warn"
+            _check_exists "contracts" "contracts/ (DTO interfaces)" "warn"
+            ;;
+        python)
+            _check_exists "app/main.py" "app/main.py (entry point)" "warn"
+            _check_exists "app/modules" "app/modules/ (domain modules)" "warn"
+            _check_exists "contracts" "contracts/ (DTOs)" "warn"
+            _check_exists "database" "database/ (adapter)" "warn"
+            ;;
+        typescript)
+            _check_exists "src" "src/ (source directory)" "warn"
+            _check_exists "contracts" "contracts/ (DTOs)" "warn"
+            ;;
+        nodejs)
+            _check_exists "src" "src/ (source directory)" "warn"
+            _check_exists "src/modules" "src/modules/ (domain modules)" "warn"
+            _check_exists "contracts" "contracts/ (DTOs)" "warn"
+            _check_exists "database" "database/ (adapter)" "warn"
+            ;;
+        rust)
+            _check_exists "src/main.rs" "src/main.rs (entry point)" "warn"
+            _check_exists "src/modules" "src/modules/ (domain modules)" "warn"
+            ;;
+        java)
+            _check_exists "src/main/java" "src/main/java/ (source)" "warn"
+            ;;
+    esac
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: add
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_add() {
+    local resource_type=""
+    local resource_name=""
+    local target_dir="."
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir=*) target_dir="${1#*=}"; shift ;;
+            --dir)   target_dir="${2}"; shift 2 ;;
+            --no-agent) SKIP_AGENT=true; shift ;;
+            -*)      die "Unknown option: $1" ;;
+            *)
+                if [[ -z "${resource_type}" ]]; then
+                    resource_type="$1"
+                elif [[ -z "${resource_name}" ]]; then
+                    resource_name="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+
+    case "${resource_type}" in
+        skill)
+            [[ -z "${resource_name}" ]] && die "Usage: skeleton add skill <name>"
+            _add_skill "${resource_name}" "${target_dir}"
+            # Background agent validates the newly added skill
+            _spawn_copilot_agent_bg "${target_dir}" "doctor" \
+                "Validate the newly installed skill '${resource_name}': 1) SKILL.md follows correct format (frontmatter with name, type, description + Purpose, Rules, Inputs, Outputs, Examples, Checklist sections). 2) Skill is referenced in relevant agent files that need it. 3) No conflicts with existing skills. Report findings in .parallel-dev/agent-logs/." \
+                "add-skill-${resource_name}"
+            ;;
+        agent)
+            [[ -z "${resource_name}" ]] && die "Usage: skeleton add agent <name>"
+            _add_agent "${resource_name}" "${target_dir}"
+            # Background agent validates the newly added agent
+            _spawn_copilot_agent_bg "${target_dir}" "doctor" \
+                "Validate the newly installed agent '${resource_name}': 1) Agent file follows correct format (description, skills, instructions). 2) All referenced skills exist in .github/skills/. 3) No conflicts with existing agents. Report findings in .parallel-dev/agent-logs/." \
+                "add-agent-${resource_name}"
+            ;;
+        *)
+            die "Usage: skeleton add <skill|agent> <name>"
+            ;;
+    esac
+}
+
+_add_skill() {
+    local name="$1" dest="$2"
+    local src="${SKELETON_ROOT}/.github/skills/${name}"
+
+    if [[ ! -d "${src}" ]]; then
+        die "Skill '${name}' not found.\nAvailable: $(get_available_skills | tr '\n' ' ')"
+    fi
+
+    mkdir -p "${dest}/.github/skills"
+    cp -R "${src}" "${dest}/.github/skills/"
+    log_ok "Skill '${name}' installed to ${dest}/.github/skills/${name}/"
+}
+
+_add_agent() {
+    local name="$1" dest="$2"
+    local src="${SKELETON_ROOT}/.github/agents/${name}.agent.md"
+
+    if [[ ! -f "${src}" ]]; then
+        die "Agent '${name}' not found.\nAvailable: $(get_available_agents | tr '\n' ' ')"
+    fi
+
+    mkdir -p "${dest}/.github/agents"
+    cp "${src}" "${dest}/.github/agents/"
+    log_ok "Agent '${name}' installed to ${dest}/.github/agents/${name}.agent.md"
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: list
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_list() {
+    local filter="${1:-all}"
+
+    echo ""
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  skeleton list                               ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    if [[ "${filter}" == "all" ]] || [[ "${filter}" == "templates" ]]; then
+        echo -e "${BOLD}Templates:${NC}"
+        for lang in "${SUPPORTED_LANGUAGES[@]}"; do
+            if [[ -d "${TEMPLATES_DIR}/${lang}" ]]; then
+                echo -e "  ${GREEN}●${NC} ${lang}"
+            else
+                echo -e "  ${RED}○${NC} ${lang} (not installed)"
+            fi
+        done
+        echo ""
+    fi
+
+    if [[ "${filter}" == "all" ]] || [[ "${filter}" == "skills" ]]; then
+        echo -e "${BOLD}Skills:${NC}"
+        get_available_skills | while read -r skill; do
+            local desc=""
+            local skill_file="${SKELETON_ROOT}/.github/skills/${skill}/SKILL.md"
+            if [[ -f "${skill_file}" ]]; then
+                desc="$(grep -m1 '^description:' "${skill_file}" 2>/dev/null | sed 's/^description:[[:space:]]*//' | tr -d '"' || true)"
+            fi
+            echo -e "  ${GREEN}●${NC} ${skill}${desc:+ — ${desc}}"
+        done
+        echo ""
+    fi
+
+    if [[ "${filter}" == "all" ]] || [[ "${filter}" == "agents" ]]; then
+        echo -e "${BOLD}Agents:${NC}"
+        get_available_agents | while read -r agent; do
+            local desc=""
+            local agent_file="${SKELETON_ROOT}/.github/agents/${agent}.agent.md"
+            if [[ -f "${agent_file}" ]]; then
+                desc="$(grep -m1 '^description:' "${agent_file}" 2>/dev/null | sed 's/^description:[[:space:]]*//' | tr -d '"' || true)"
+            fi
+            echo -e "  ${GREEN}●${NC} ${agent}${desc:+ — ${desc}}"
+        done
+        echo ""
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: sync
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_sync() {
+    local target_dir="."
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir=*) target_dir="${1#*=}"; shift ;;
+            --dir)   target_dir="${2}"; shift 2 ;;
+            --no-agent) SKIP_AGENT=true; shift ;;
+            -*)      die "Unknown option: $1" ;;
+            *)       target_dir="$1"; shift ;;
+        esac
+    done
+
+    target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+
+    echo ""
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  skeleton sync                               ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    log_info "Syncing from: ${BOLD}${SKELETON_ROOT}${NC}"
+    log_info "Target:       ${BOLD}${target_dir}${NC}"
+    echo ""
+
+    # Force-sync all framework files
+    # Guard: ensure target_dir is set and non-empty
+    [[ -z "${target_dir}" ]] && die "Target directory is empty — aborting sync"
+    [[ ! -d "${target_dir}" ]] && die "Target directory does not exist: ${target_dir}"
+
+    log_step "Syncing skills..."
+    if [[ -d "${SKELETON_ROOT}/.github/skills" ]]; then
+        [[ -d "${target_dir}/.github/skills" ]] && rm -rf "${target_dir}/.github/skills"
+        mkdir -p "${target_dir}/.github"
+        cp -R "${SKELETON_ROOT}/.github/skills" "${target_dir}/.github/"
+        log_ok "Skills synced"
+    fi
+
+    log_step "Syncing agents..."
+    if [[ -d "${SKELETON_ROOT}/.github/agents" ]]; then
+        [[ -d "${target_dir}/.github/agents" ]] && rm -rf "${target_dir}/.github/agents"
+        mkdir -p "${target_dir}/.github"
+        cp -R "${SKELETON_ROOT}/.github/agents" "${target_dir}/.github/"
+        log_ok "Agents synced"
+    fi
+
+    log_step "Syncing prompts..."
+    if [[ -d "${SKELETON_ROOT}/.github/prompts" ]]; then
+        [[ -d "${target_dir}/.github/prompts" ]] && rm -rf "${target_dir}/.github/prompts"
+        mkdir -p "${target_dir}/.github"
+        cp -R "${SKELETON_ROOT}/.github/prompts" "${target_dir}/.github/"
+        log_ok "Prompts synced"
+    fi
+
+    log_step "Syncing run_parallel.sh..."
+    mkdir -p "${target_dir}/scripts"
+    cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${target_dir}/scripts/"
+    chmod +x "${target_dir}/scripts/run_parallel.sh"
+    log_ok "run_parallel.sh synced"
+
+    log_step "Syncing copilot-instructions.md..."
+    cp "${SKELETON_ROOT}/.github/copilot-instructions.md" "${target_dir}/.github/"
+    log_ok "copilot-instructions.md synced"
+
+    echo ""
+    log_ok "Sync complete!"
+    echo ""
+
+    # Background agent validates sync results
+    _spawn_copilot_agent_bg "${target_dir}" "doctor" \
+        "Validate post-sync state: 1) All skills match upstream (${SKELETON_ROOT}). 2) All agents match upstream. 3) run_parallel.sh is current and executable. 4) copilot-instructions.md is current. 5) No custom configurations were accidentally overwritten. Report findings in .parallel-dev/agent-logs/." \
+        "sync-validation"
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: autoskills
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_autoskills() {
+    local target_dir="."
+    local dry_run=false
+    local auto_yes=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir=*)    target_dir="${1#*=}"; shift ;;
+            --dir)      target_dir="${2}"; shift 2 ;;
+            --dry-run)  dry_run=true; shift ;;
+            --no-agent) SKIP_AGENT=true; shift ;;
+            -y)         auto_yes=true; shift ;;
+            -*)         die "Unknown option: $1" ;;
+            *)          target_dir="$1"; shift ;;
+        esac
+    done
+
+    target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+
+    echo ""
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  skeleton autoskills                         ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    log_info "Scanning: ${BOLD}${target_dir}${NC}"
+    echo ""
+
+    # ── Language detection ────────────────────────────────────────────────
+    local detected_lang
+    detected_lang="$(_detect_language "${target_dir}")"
+    log_step "Detected language: ${detected_lang:-unknown}"
+
+    # ── Feature detection ─────────────────────────────────────────────────
+    local features=()
+
+    # SQL / migrations
+    if find "${target_dir}" -maxdepth 4 -name '*.sql' -not -path '*/.*' | grep -q .; then
+        features+=("database")
+    elif [[ -d "${target_dir}/database/migrations" ]] || [[ -d "${target_dir}/migrations" ]]; then
+        features+=("database")
+    fi
+
+    # Tests
+    local test_patterns=('*_test.go' 'test_*.py' '*_test.py' '*_test.ts' '*_test.js' '*_test.rs' '*Test.java')
+    for pat in "${test_patterns[@]}"; do
+        if find "${target_dir}" -maxdepth 6 -name "${pat}" -not -path '*/.*' | grep -q .; then
+            features+=("tests")
+            break
+        fi
+    done
+
+    # Docker
+    if [[ -f "${target_dir}/Dockerfile" ]] || [[ -f "${target_dir}/docker-compose.yml" ]]; then
+        features+=("docker")
+    fi
+
+    # API / OpenAPI / gRPC
+    if find "${target_dir}" -maxdepth 3 \( -name 'openapi.yaml' -o -name 'openapi.json' -o -name '*.proto' \) | grep -q .; then
+        features+=("api")
+    fi
+
+    # Pipeline / architecture docs present
+    if [[ -f "${target_dir}/docs/architecture.md" ]]; then
+        features+=("pipeline")
+    fi
+
+    if [[ ${#features[@]} -gt 0 ]]; then
+        log_ok "Detected features: ${features[*]}"
+    else
+        log_info "No special features detected"
+    fi
+    echo ""
+
+    # ── Skill mapping ─────────────────────────────────────────────────────
+    # Core skills installed for every project
+    local skills_to_install=("running-prompt" "code-quality" "coding-standards"
+                              "security-audit" "token-optimization" "brainstorming"
+                              "writing-plans" "subagent-driven-development")
+
+    # Language-specific skills
+    case "${detected_lang}" in
+        go)
+            skills_to_install+=("modularity" "dto" "determinism" "idempotency"
+                                 "failure" "database-portability" "migration-management"
+                                 "config-validation" "test-generation" "test-driven-development") ;;
+        python)
+            skills_to_install+=("modularity" "dto" "determinism" "idempotency"
+                                 "failure" "database-portability" "migration-management"
+                                 "config-validation" "test-generation" "test-driven-development") ;;
+        typescript|javascript|nodejs)
+            skills_to_install+=("modularity" "dto" "api-design" "vertical-slice"
+                                 "config-validation" "test-generation" "test-driven-development") ;;
+        rust)
+            skills_to_install+=("modularity" "dto" "determinism" "idempotency"
+                                 "failure" "config-validation" "test-generation") ;;
+        java)
+            skills_to_install+=("modularity" "dto" "api-design" "database-portability"
+                                 "migration-management" "config-validation" "test-generation") ;;
+        *)
+            skills_to_install+=("modularity" "dto" "config-validation" "test-generation") ;;
+    esac
+
+    # Feature-specific skills
+    for feature in "${features[@]}"; do
+        case "${feature}" in
+            database) skills_to_install+=("database-portability" "migration-management") ;;
+            tests)    skills_to_install+=("test-generation" "test-driven-development") ;;
+            api)      skills_to_install+=("api-design") ;;
+            pipeline) skills_to_install+=("pipeline" "orchestrator" "failure" "idempotency") ;;
+        esac
+    done
+
+    # Always include quality skills
+    skills_to_install+=("docs-sync" "dependency-analysis" "conflict-resolution")
+
+    # Deduplicate while preserving order
+    local -A seen
+    local unique_skills=()
+    for s in "${skills_to_install[@]}"; do
+        if [[ -z "${seen[$s]+x}" ]]; then
+            seen[$s]=1
+            unique_skills+=("$s")
+        fi
+    done
+    skills_to_install=("${unique_skills[@]}")
+
+    # ── Availability check ────────────────────────────────────────────────
+    local available=() unavailable=()
+    for skill in "${skills_to_install[@]}"; do
+        if [[ -d "${SKELETON_ROOT}/.github/skills/${skill}" ]]; then
+            available+=("${skill}")
+        else
+            unavailable+=("${skill}")
+        fi
+    done
+
+    # ── Show plan ─────────────────────────────────────────────────────────
+    log_step "Skills to install (${#available[@]}):" 
+    for skill in "${available[@]}"; do
+        if [[ -f "${target_dir}/.github/skills/${skill}/SKILL.md" ]]; then
+            echo "    ${skill} ${YELLOW}(already installed)${NC}"
+        else
+            echo "    ${skill}"
+        fi
+    done
+
+    if [[ ${#unavailable[@]} -gt 0 ]]; then
+        echo ""
+        log_warn "Skipped (not in skeleton): ${unavailable[*]}"
+    fi
+
+    if [[ "${dry_run}" == true ]]; then
+        echo ""
+        log_info "Dry run complete. Use without --dry-run to install."
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    if [[ "${auto_yes}" != true ]]; then
+        printf "%b" "${BOLD}Install ${#available[@]} skills to ${target_dir}/.github/skills/? [y/N] ${NC}"
+        read -r confirm
+        if [[ "${confirm,,}" != "y" ]]; then
+            log_info "Aborted."
+            echo ""
+            return 0
+        fi
+    fi
+
+    # ── Install ───────────────────────────────────────────────────────────
+    echo ""
+    mkdir -p "${target_dir}/.github/skills"
+    local installed=0 skipped=0
+    for skill in "${available[@]}"; do
+        local src="${SKELETON_ROOT}/.github/skills/${skill}"
+        local dst="${target_dir}/.github/skills/${skill}"
+        if [[ -d "${src}" ]]; then
+            cp -r "${src}" "${dst}/"
+            log_ok "Installed: ${skill}"
+            ((installed++))
+        else
+            ((skipped++))
+        fi
+    done
+
+    echo ""
+    log_ok "Done. ${installed} skill(s) installed, ${skipped} skipped."
+    echo ""
+
+    # Background agent validates auto-installed skills
+    if [[ ${installed} -gt 0 ]]; then
+        _spawn_copilot_agent_bg "${target_dir}" "doctor" \
+            "Validate auto-installed skills for this ${detected_lang:-unknown} project: 1) All installed skills have valid SKILL.md format. 2) Skills match the project's detected technology stack. 3) Skills are properly wired in agent files. 4) No conflicting or duplicate skills. 5) Recommend additional skills if needed. Report findings in .parallel-dev/agent-logs/." \
+            "autoskills-validation"
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: version / help
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_version() {
+    echo "skeleton v${VERSION} (skeleton-parallel framework)"
+}
+
+cmd_help() {
+    cat <<'EOF'
+
+  skeleton — CLI for the skeleton-parallel framework (v1.1.0)
+
+  USAGE:
+    skeleton <command> [options]
+
+  COMMANDS:
+    init <language>           Initialize a new project from template
+    upgrade [--dir=DIR]       Upgrade existing repo with skeleton-parallel
+    doctor [--dir=DIR]        Validate project health and wiring
+    add skill <name>          Add a skill to current project
+    add agent <name>          Add an agent to current project
+    list [skills|agents|templates]  List available resources
+    sync [--dir=DIR]          Force-sync all skills/agents/scripts from upstream
+    autoskills [--dir=DIR]    Auto-detect stack and install matching skills
+    version                   Show version
+    help                      Show this help
+
+  INIT OPTIONS:
+    --name=NAME               Project name (default: directory name)
+    --dir=DIR                 Target directory (default: ./<name>)
+    --no-agent                Skip Copilot agent spawning
+
+  UPGRADE OPTIONS:
+    --dir=DIR                 Target directory (default: .)
+    --mode=MODE               Force upgrade mode: replace, hybrid, or skip
+    --no-agent                Skip Copilot agent spawning
+
+  AGENT BEHAVIOR:
+    By default, file-modifying commands (init, upgrade, doctor, sync, add,
+    autoskills) spawn a Copilot CLI agent for validation or deep health check.
+    Use --no-agent to disable agent spawning, or set SKIP_AGENT=true.
+    Agent model: controlled by COPILOT_MODEL env var (default: claude-sonnet-4.6).
+    Agent logs are saved to .parallel-dev/agent-logs/.
+
+  SUPPORTED LANGUAGES:
+    go          Vertical slice architecture (handler/service/repository per feature)
+    python      Modular monolith (module/feature/handler pattern)
+    typescript  Modular monolith (module/feature pattern)
+    nodejs      Modular monolith (Express/Fastify pattern)
+    rust        Modular monolith (module/feature pattern)
+    java        Modular monolith (module/feature pattern)
+
+  EXAMPLES:
+    skeleton init go --name=my-service
+    skeleton init python --name=trading-system --dir=~/projects/trading
+    skeleton init nodejs --name=api-gateway --no-agent
+    skeleton upgrade --dir=../existing-project
+    skeleton upgrade --dir=../existing-project --mode=hybrid
+    skeleton doctor
+    skeleton add skill security-audit
+    skeleton add agent test-builder
+    skeleton list skills
+    skeleton sync --dir=../my-project
+    skeleton autoskills --dir=../existing-project --dry-run
+    skeleton autoskills -y
+
+  ENVIRONMENT VARIABLES:
+    COPILOT_MODEL             Model for Copilot agent (default: claude-sonnet-4.6)
+    SKIP_AGENT                Set to 'true' to disable agent spawning globally
+
+EOF
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MAIN ROUTER
+# ═════════════════════════════════════════════════════════════════════════════
+main() {
+    if [[ $# -eq 0 ]]; then
+        cmd_help
+        exit 0
+    fi
+
+    local command="$1"
+    shift
+
+    case "${command}" in
+        init)       cmd_init "$@" ;;
+        upgrade)    cmd_upgrade "$@" ;;
+        doctor)     cmd_doctor "$@" ;;
+        autoskills) cmd_autoskills "$@" ;;
+        add)        cmd_add "$@" ;;
+        list)       cmd_list "$@" ;;
+        sync)       cmd_sync "$@" ;;
+        version)    cmd_version ;;
+        help|-h|--help) cmd_help ;;
+        *)          die "Unknown command: ${command}\nRun 'skeleton help' for usage." ;;
+    esac
+}
+
+main "$@"

@@ -31,8 +31,22 @@ You are an elite Staff+ Software Architect and Developer implementing a **determ
 - `.github/skills/failure/SKILL.md` — retry, abort, degradation
 - `.github/skills/config-validation/SKILL.md` — config-driven parameters
 - `.github/skills/code-quality/SKILL.md` — type annotations, logging, code standards
+- `.github/skills/coding-standards/SKILL.md` — naming, function design, language idioms
 - `.github/skills/database-portability/SKILL.md` — portable SQL and adapter rules
 - `.github/skills/token-optimization/SKILL.md` — efficient context loading
+- `.github/skills/brainstorming/SKILL.md` — design-first gate before any implementation
+- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
+- `.github/skills/test-driven-development/SKILL.md` — RED-GREEN-REFACTOR cycle
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxyr rules
+- `.github/skills/token-optimization/SKILL.md` — efficient context loading
+- `.github/skills/brainstorming/SKILL.md` — design-first gate before any implementation
+- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
+- `.github/skills/test-driven-development/SKILL.md` — RED-GREEN-REFACTOR cycle
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 
 ## Execution Mode (Non-Interactive Enforcement)
 

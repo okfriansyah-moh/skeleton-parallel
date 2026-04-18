@@ -1,0 +1,12 @@
+# {{PROJECT_NAME}} — Python Dependencies
+
+# Testing
+pytest>=7.0
+pytest-cov>=4.0
+
+# Linting
+ruff>=0.4.0
+mypy>=1.0
+
+# YAML config
+pyyaml>=6.0

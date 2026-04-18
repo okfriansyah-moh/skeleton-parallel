@@ -1,0 +1,7 @@
+node_modules/
+coverage/
+output/
+*.log
+.env
+.env.local
+.parallel-dev/

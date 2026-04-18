@@ -14,6 +14,14 @@ You are a refactoring specialist. Your job is to improve code structure without 
 - `.github/skills/modularity/SKILL.md` — module boundary rules
 - `.github/skills/determinism/SKILL.md` — ensure no behavior change
 - `.github/skills/code-quality/SKILL.md` — type annotations, logging, code standards
+- `.github/skills/coding-standards/SKILL.md` — naming, function design, language idioms
+- `.github/skills/test-driven-development/SKILL.md` — RED-GREEN-REFACTOR cycle
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
+- `.github/skills/coding-standards/SKILL.md` — naming, function design, language idioms
+- `.github/skills/test-driven-development/SKILL.md` — RED-GREEN-REFACTOR cycle
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 
 ## Invariants (Must Hold Before and After Refactoring)
 

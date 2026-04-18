@@ -31,6 +31,16 @@ Agents consume skills to minimize token usage while maintaining constraint enfor
 | merge-reviewer    | `.github/agents/merge-reviewer.agent.md`    | Post-merge validation and quality review       |
 | task-sync         | `.github/agents/task-sync.agent.md`         | Structured task execution workflow             |
 
+### Framework Agents
+
+| Agent            | File                                       | Purpose                                        |
+| ---------------- | ------------------------------------------ | ---------------------------------------------- |
+| scaffold         | `.github/agents/scaffold.agent.md`         | Initialize new projects with correct structure |
+| security-auditor | `.github/agents/security-auditor.agent.md` | OWASP-aware security review and CVSS scoring   |
+| test-builder     | `.github/agents/test-builder.agent.md`     | Generate unit and integration tests            |
+| upgrade-manager  | `.github/agents/upgrade-manager.agent.md`  | Upgrade existing repos to use the framework    |
+| doctor           | `.github/agents/doctor.agent.md`           | Project health check and validation            |
+
 ### Agent Pipeline (Execution Order)
 
 Every phase runs through this mandatory agent chain:
@@ -46,17 +56,22 @@ phase-builder → dto-guardian → integration → refactor (conditional)
 
 ### Agent Capabilities
 
-| Agent             | Can Read | Can Edit | Can Run Tests | Can Call DB | Can Call Other Agents          |
-| ----------------- | -------- | -------- | ------------- | ----------- | ------------------------------ |
-| phase-builder     | ✅       | ✅       | ✅            | ❌          | ✅ (subagents)                 |
-| dto-guardian      | ✅       | ❌       | ❌            | ❌          | ❌                             |
-| integration       | ✅       | ✅       | ✅            | ❌          | ✅ (dto-guardian)              |
-| refactor          | ✅       | ✅       | ✅            | ❌          | ❌                             |
-| orchestrator      | ✅       | ✅       | ✅            | ❌          | ❌                             |
-| module-builder    | ✅       | ✅       | ✅            | ❌          | ❌                             |
-| conflict-resolver | ✅       | ✅       | ❌            | ❌          | ❌                             |
-| merge-reviewer    | ✅       | ❌       | ✅            | ❌          | ✅ (dto-guardian, integration) |
-| task-sync         | ✅       | ✅       | ✅            | ❌          | ✅ (subagents)                 |
+| Agent             | Can Read | Can Edit | Can Run Tests | Can Call DB | Can Call Other Agents                            |
+| ----------------- | -------- | -------- | ------------- | ----------- | ------------------------------------------------ |
+| phase-builder     | ✅       | ✅       | ✅            | ❌          | ✅ (module-builder, integration)                 |
+| dto-guardian      | ✅       | ❌       | ❌            | ❌          | ❌                                               |
+| integration       | ✅       | ✅       | ✅            | ❌          | ✅ (dto-guardian)                                |
+| refactor          | ✅       | ✅       | ✅            | ❌          | ❌                                               |
+| orchestrator      | ✅       | ✅       | ✅            | ❌          | ❌                                               |
+| module-builder    | ✅       | ✅       | ✅            | ❌          | ❌                                               |
+| conflict-resolver | ✅       | ✅       | ❌            | ❌          | ❌                                               |
+| merge-reviewer    | ✅       | ❌       | ✅            | ❌          | ✅ (dto-guardian, integration)                   |
+| task-sync         | ✅       | ✅       | ✅            | ❌          | ✅ (subagents)                                   |
+| scaffold          | ✅       | ✅       | ✅            | ❌          | ✅ (dto-guardian, doctor)                        |
+| security-auditor  | ✅       | ❌       | ❌            | ❌          | ✅ (test-builder)                                |
+| test-builder      | ✅       | ✅       | ✅            | ❌          | ✅ (Explore)                                     |
+| upgrade-manager   | ✅       | ✅       | ❌            | ❌          | ✅ (scaffold, doctor)                            |
+| doctor            | ✅       | ❌       | ❌            | ❌          | ✅ (dto-guardian, integration, security-auditor) |
 
 ---
 
@@ -75,10 +90,30 @@ phase-builder → dto-guardian → integration → refactor (conditional)
 | token-optimization   | `.github/skills/token-optimization/SKILL.md`   | Context compression, progressive loading   |
 | config-validation    | `.github/skills/config-validation/SKILL.md`    | Config-driven parameters, YAML enforcement |
 | code-quality         | `.github/skills/code-quality/SKILL.md`         | Type annotations, logging, code standards  |
+| coding-standards     | `.github/skills/coding-standards/SKILL.md`     | Naming, function design, language idioms   |
 | conflict-resolution  | `.github/skills/conflict-resolution/SKILL.md`  | Git merge conflict resolution              |
 | docs-sync            | `.github/skills/docs-sync/SKILL.md`            | Documentation drift detection              |
 | database-portability | `.github/skills/database-portability/SKILL.md` | Engine-agnostic SQL, adapter patterns      |
 | running-prompt       | `.github/skills/running-prompt/SKILL.md`       | Structured task execution workflow         |
+
+### Framework Skills
+
+| Skill                       | File                                                  | Purpose                                     |
+| --------------------------- | ----------------------------------------------------- | ------------------------------------------- |
+| security-audit              | `.github/skills/security-audit/SKILL.md`              | OWASP security auditing, CVSS scoring       |
+| test-generation             | `.github/skills/test-generation/SKILL.md`             | Test patterns, coverage, AAA structure      |
+| vertical-slice              | `.github/skills/vertical-slice/SKILL.md`              | Feature-per-folder architecture             |
+| api-design                  | `.github/skills/api-design/SKILL.md`                  | REST/gRPC API patterns, error formats       |
+| project-scaffold            | `.github/skills/project-scaffold/SKILL.md`            | Project initialization and validation       |
+| dependency-analysis         | `.github/skills/dependency-analysis/SKILL.md`         | Import graph and coupling analysis          |
+| migration-management        | `.github/skills/migration-management/SKILL.md`        | Database migration best practices           |
+| performance-optimization    | `.github/skills/performance-optimization/SKILL.md`    | Performance profiling and optimization      |
+| caveman                     | `.github/skills/caveman/SKILL.md`                     | Ultra-compressed output (~75% fewer tokens) |
+| brainstorming               | `.github/skills/brainstorming/SKILL.md`               | Design-first gate before any implementation |
+| writing-plans               | `.github/skills/writing-plans/SKILL.md`               | Break work into bite-sized tasks            |
+| subagent-driven-development | `.github/skills/subagent-driven-development/SKILL.md` | Fresh subagent per task + 2-stage review    |
+| test-driven-development     | `.github/skills/test-driven-development/SKILL.md`     | RED-GREEN-REFACTOR cycle enforcement        |
+| rtk                         | `.github/skills/rtk/SKILL.md`                         | Token-efficient CLI proxy (60-90% savings)  |
 
 ### Skill Structure
 
@@ -120,6 +155,8 @@ Pre-commit verification items.
 
 ## 4. Agent ↔ Skill Composition Matrix
 
+### Core Pipeline Agents
+
 | Agent             | Always Loads                                | Loads On-Demand                             |
 | ----------------- | ------------------------------------------- | ------------------------------------------- |
 | phase-builder     | dto, modularity, pipeline                   | determinism, idempotency, config-validation |
@@ -131,6 +168,27 @@ Pre-commit verification items.
 | conflict-resolver | conflict-resolution                         | dto, modularity                             |
 | merge-reviewer    | dto, pipeline, modularity                   | docs-sync                                   |
 | task-sync         | running-prompt, modularity                  | dto, pipeline, code-quality                 |
+
+### Framework Agents
+
+| Agent            | Always Loads                                        | Loads On-Demand      |
+| ---------------- | --------------------------------------------------- | -------------------- |
+| scaffold         | project-scaffold, vertical-slice, config-validation | code-quality         |
+| security-auditor | security-audit, code-quality                        | dependency-analysis  |
+| test-builder     | test-generation, code-quality                       | modularity, dto      |
+| upgrade-manager  | project-scaffold, config-validation                 | pipeline, modularity |
+| doctor           | config-validation, modularity, dependency-analysis  | docs-sync            |
+
+### SubAgent Delegation Map
+
+| Caller Agent     | Delegates To                                | Purpose                                       |
+| ---------------- | ------------------------------------------- | --------------------------------------------- |
+| scaffold         | dto-guardian, doctor                        | Validate contracts, post-init health check    |
+| security-auditor | test-builder                                | Generate tests for identified vulnerabilities |
+| test-builder     | Explore                                     | Find untested code paths                      |
+| upgrade-manager  | scaffold, doctor                            | Generate missing structure, validate result   |
+| doctor           | dto-guardian, integration, security-auditor | Deep DTO/coupling/security checks             |
+| phase-builder    | module-builder, integration                 | Build modules, wire pipeline                  |
 
 ### Loading Priority
 

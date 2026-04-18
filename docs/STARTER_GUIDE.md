@@ -9,13 +9,82 @@
 - **Runtime environment** for the project’s chosen language installed
 - **Git** with worktree support (Git 2.5+)
 - **VS Code** with GitHub Copilot extension
-- (Optional) **Copilot CLI** for automated parallel execution
+- **Copilot CLI** for automated agent validation (required by default, see Agent Behavior below)
 
 ---
 
 ## 2. Quick Start
 
-### Step 1: Clone the Framework
+### Option A: Using the Skeleton CLI (Recommended)
+
+```bash
+# Install the framework
+git clone <skeleton-parallel-repo-url>
+export PATH="$PWD/skeleton-parallel/bin:$PATH"
+
+# Initialize a new Go project
+skeleton init go --name=my-service --dir=my-service
+cd my-service
+
+# Verify setup
+skeleton doctor
+```
+
+Supported languages: `go`, `python`, `typescript`, `nodejs`, `rust`, `java`
+
+The CLI creates a complete project with:
+
+- Modular monolith structure with health module reference implementation
+- All framework files (.github/, scripts/, config/, docs/)
+- 28 skills, 14 agents, 5 prompts pre-installed
+- Language-specific build/test tooling
+- Git repository initialized
+
+### Option B: Upgrade an Existing Repository
+
+```bash
+cd existing-project
+skeleton upgrade            # Auto-detects existing mechanisms, prompts Replace/Hybrid/Skip
+skeleton upgrade --mode=hybrid  # Force hybrid mode (merge additively)
+skeleton doctor
+```
+
+The upgrade command now:
+
+1. **Detects** existing skeleton-parallel mechanisms (skills, agents, prompts, run_parallel.sh, etc.)
+2. **Prompts** for upgrade mode if mechanisms are found:
+   - **Replace** — Remove existing, install fresh from upstream
+   - **Hybrid** — Merge additively (add missing, preserve custom files)
+   - **Skip** — Install only completely new components
+3. **Spawns** a Copilot agent for post-upgrade validation and auto-fix
+
+### Agent Behavior
+
+Starting with v1.1.0, all file-modifying commands automatically spawn a Copilot CLI agent for validation:
+
+| Command      | Agent Mode    | Agent Task                                                  |
+| ------------ | ------------- | ----------------------------------------------------------- |
+| `init`       | Foreground    | Validates project structure, docs, parallel readiness       |
+| `upgrade`    | Foreground    | Validates upgrade completeness, fixes issues                |
+| `doctor`     | Foreground/BG | Deep health check with auto-fix (FG if issues, BG if clean) |
+| `sync`       | Background    | Validates sync results didn't break anything                |
+| `add`        | Background    | Validates newly added skill/agent format                    |
+| `autoskills` | Background    | Validates skills match project's technology stack           |
+
+**Disabling agents:**
+
+```bash
+skeleton init go --name=my-service --no-agent    # Per-command
+SKIP_AGENT=true skeleton upgrade                  # Global via env var
+```
+
+**Agent model:** Controlled by `COPILOT_MODEL` env var (default: `claude-sonnet-4.6`).
+
+**Agent logs:** Saved to `.parallel-dev/agent-logs/` with timestamps.
+
+### Option C: Manual Setup
+
+#### Step 1: Clone the Framework
 
 ```bash
 git clone <skeleton-parallel-repo-url> my-project
@@ -100,6 +169,16 @@ Once Phase 0 is complete, run remaining phases in parallel:
 
 ```
 skeleton-parallel/
+├── bin/
+│   └── skeleton                   # CLI tool (init, upgrade, doctor, add, list, sync, autoskills)
+├── templates/                     # Language-specific project templates
+│   ├── common/                    # Shared files (README, .gitignore)
+│   ├── go/                        # Go vertical slice template
+│   ├── python/                    # Python modular monolith template
+│   ├── typescript/                # TypeScript template
+│   ├── nodejs/                    # Node.js (JavaScript) template
+│   ├── rust/                      # Rust template
+│   └── java/                      # Java template
 ├── .github/
 │   ├── copilot-instructions.md    # Hard architectural constraints (always loaded)
 │   ├── prompts/                   # One-shot generation prompts
@@ -108,8 +187,8 @@ skeleton-parallel/
 │   │   ├── orchestrator.prompt.md
 │   │   ├── dto.prompt.md
 │   │   └── db_adapter.prompt.md
-│   ├── agents/                    # Autonomous execution agents
-│   │   ├── phase-builder.agent.md
+│   ├── agents/                    # Autonomous execution agents (14 total)
+│   │   ├── phase-builder.agent.md     # Core pipeline agents
 │   │   ├── dto-guardian.agent.md
 │   │   ├── integration.agent.md
 │   │   ├── refactor.agent.md
@@ -117,9 +196,14 @@ skeleton-parallel/
 │   │   ├── module-builder.agent.md
 │   │   ├── conflict-resolver.agent.md
 │   │   ├── merge-reviewer.agent.md
-│   │   └── task-sync.agent.md
-│   └── skills/                    # Focused knowledge modules (folder-based)
-│       ├── dto/SKILL.md
+│   │   ├── task-sync.agent.md
+│   │   ├── scaffold.agent.md          # Framework agents
+│   │   ├── security-auditor.agent.md
+│   │   ├── test-builder.agent.md
+│   │   ├── upgrade-manager.agent.md
+│   │   └── doctor.agent.md
+│   └── skills/                    # Focused knowledge modules (28 total)
+│       ├── dto/SKILL.md               # Core pipeline skills
 │       ├── pipeline/SKILL.md
 │       ├── modularity/SKILL.md
 │       ├── determinism/SKILL.md
@@ -128,10 +212,25 @@ skeleton-parallel/
 │       ├── token-optimization/SKILL.md
 │       ├── config-validation/SKILL.md
 │       ├── code-quality/SKILL.md
+│       ├── coding-standards/SKILL.md
 │       ├── conflict-resolution/SKILL.md
 │       ├── docs-sync/SKILL.md
 │       ├── database-portability/SKILL.md
-│       └── running-prompt/SKILL.md
+│       ├── running-prompt/SKILL.md
+│       ├── security-audit/SKILL.md    # Framework skills
+│       ├── test-generation/SKILL.md
+│       ├── vertical-slice/SKILL.md
+│       ├── api-design/SKILL.md
+│       ├── project-scaffold/SKILL.md
+│       ├── dependency-analysis/SKILL.md
+│       ├── migration-management/SKILL.md
+│       ├── performance-optimization/SKILL.md
+│       ├── caveman/SKILL.md           # Always-active skills
+│       ├── brainstorming/SKILL.md
+│       ├── writing-plans/SKILL.md
+│       ├── subagent-driven-development/SKILL.md
+│       ├── test-driven-development/SKILL.md
+│       └── rtk/SKILL.md
 ├── docs/                          # Architecture + specs (templates)
 ├── contracts/                     # Immutable DTO definitions
 ├── database/                      # DB adapter + migrations
@@ -231,9 +330,9 @@ The script:
 
 1. Define the stage in `docs/architecture.md`
 2. Add the DTO contract in `docs/dto_contracts.md`
-3. Create the module under `app/modules/stage_name/`
-4. Define DTOs in `contracts/stage_name.py`
-5. Wire into `app/orchestrator/pipeline.py`
+3. Create the module under `app/modules/<stage_name>/` (or `src/modules/` for TypeScript/Node.js)
+4. Define DTOs in `contracts/<stage_name>.*` (language-specific extension)
+5. Wire into `app/orchestrator/pipeline.*`
 6. Add to `docs/implementation_roadmap.md`
 
 ### Adding Skills
@@ -251,3 +350,70 @@ Create `.github/agents/new_agent.agent.md` with:
 - YAML frontmatter (name, description, argument-hint, tools, model)
 - Skills Used section referencing `.github/skills/<name>/SKILL.md`
 - Role, Responsibilities, Constraints, Source of Truth, Output sections
+
+---
+
+## 7. Skeleton CLI Reference
+
+### Commands
+
+| Command                                     | Description                                                             |
+| ------------------------------------------- | ----------------------------------------------------------------------- |
+| `skeleton init <lang>`                      | Create a new project (go, python, typescript, nodejs, rust, java)       |
+| `skeleton upgrade`                          | Upgrade existing repo — detects mechanisms, prompts Replace/Hybrid/Skip |
+| `skeleton doctor`                           | Validate project health; auto-fix via Copilot agent if issues found     |
+| `skeleton autoskills`                       | Detect tech stack and install matching skills automatically             |
+| `skeleton add skill <name>`                 | Install a specific skill                                                |
+| `skeleton add agent <name>`                 | Install a specific agent                                                |
+| `skeleton list [skills\|agents\|templates]` | Show available resources                                                |
+| `skeleton sync`                             | Force-update all skills, agents, prompts, and run_parallel.sh           |
+| `skeleton version`                          | Show CLI version                                                        |
+
+### Options
+
+| Option        | Applies to         | Description                                                   |
+| ------------- | ------------------ | ------------------------------------------------------------- |
+| `--name=NAME` | `init`             | Project name (default: directory name)                        |
+| `--dir=DIR`   | most commands      | Target directory (default: current directory or project name) |
+| `--mode=MODE` | `upgrade`          | Force upgrade mode: `replace`, `hybrid`, or `skip`            |
+| `--no-agent`  | all file-modifying | Skip Copilot CLI agent spawning for this invocation           |
+| `--dry-run`   | `autoskills`       | Preview skills to install without installing                  |
+| `-y`          | `autoskills`       | Skip confirmation prompt                                      |
+
+### Environment Variables
+
+| Variable        | Default             | Description                                      |
+| --------------- | ------------------- | ------------------------------------------------ |
+| `COPILOT_MODEL` | `claude-sonnet-4.6` | Model used by all spawned Copilot agents         |
+| `SKIP_AGENT`    | _(unset)_           | Set to `true` to globally disable agent spawning |
+
+### Examples
+
+```bash
+# Create a Go project named "payment-service"
+skeleton init go --name=payment-service
+
+# Create a TypeScript project, skip agent validation
+skeleton init typescript --name=my-api --no-agent
+
+# Upgrade with forced hybrid mode (add missing, preserve custom)
+skeleton upgrade --mode=hybrid
+
+# Auto-detect and install skills for current project
+skeleton autoskills -y
+
+# Preview which skills would be installed
+skeleton autoskills --dry-run
+
+# Add a specific skill to current project
+skeleton add skill security-audit
+
+# List all available skills
+skeleton list skills
+
+# Force-sync all framework files from upstream
+skeleton sync
+
+# Use a different model for agent validation
+COPILOT_MODEL=claude-opus-4.6 skeleton doctor
+```

@@ -241,19 +241,34 @@ Skills are pre-digested knowledge packages that agents load on-demand. They live
 
 ```
 .github/skills/
-├── dto/SKILL.md                 # DTO validation and registry
-├── pipeline/SKILL.md            # Stage ordering and dependencies
-├── modularity/SKILL.md          # Module boundary enforcement
-├── determinism/SKILL.md         # No-randomness enforcement
-├── idempotency/SKILL.md         # Content-addressable IDs, ON CONFLICT
-├── failure/SKILL.md             # Retry, abort, degradation
-├── token-optimization/SKILL.md  # Context loading optimization
-├── config-validation/SKILL.md   # Config-driven parameters
-├── code-quality/SKILL.md        # Type hints, logging, standards
-├── conflict-resolution/SKILL.md # Git merge conflict resolution
-├── docs-sync/SKILL.md           # Documentation drift detection
-├── database-portability/SKILL.md # Engine-agnostic SQL
-└── running-prompt/SKILL.md      # Structured task execution workflow
+├── dto/SKILL.md                     # DTO validation and registry
+├── pipeline/SKILL.md                # Stage ordering and dependencies
+├── modularity/SKILL.md              # Module boundary enforcement
+├── determinism/SKILL.md             # No-randomness enforcement
+├── idempotency/SKILL.md             # Content-addressable IDs, ON CONFLICT
+├── failure/SKILL.md                 # Retry, abort, degradation
+├── token-optimization/SKILL.md      # Context loading optimization
+├── config-validation/SKILL.md       # Config-driven parameters
+├── code-quality/SKILL.md            # Type hints, logging, standards
+├── coding-standards/SKILL.md        # Naming, function design, language idioms
+├── conflict-resolution/SKILL.md     # Git merge conflict resolution
+├── docs-sync/SKILL.md               # Documentation drift detection
+├── database-portability/SKILL.md    # Engine-agnostic SQL
+├── running-prompt/SKILL.md          # Structured task execution workflow
+├── security-audit/SKILL.md          # OWASP security auditing
+├── test-generation/SKILL.md         # Test patterns and coverage
+├── vertical-slice/SKILL.md          # Feature-per-folder architecture
+├── api-design/SKILL.md              # REST/gRPC API patterns
+├── project-scaffold/SKILL.md        # Project initialization validation
+├── dependency-analysis/SKILL.md     # Import graph and coupling analysis
+├── migration-management/SKILL.md    # Database migration best practices
+├── performance-optimization/SKILL.md # Performance profiling patterns
+├── caveman/SKILL.md                 # Ultra-compressed output mode (~75% fewer tokens)
+├── brainstorming/SKILL.md           # Design-first gate before any implementation
+├── writing-plans/SKILL.md           # Break work into bite-sized implementation tasks
+├── subagent-driven-development/SKILL.md # Fresh subagent per task + 2-stage review
+├── test-driven-development/SKILL.md # RED-GREEN-REFACTOR cycle enforcement
+└── rtk/SKILL.md                     # Token-efficient CLI proxy (60-90% savings)
 ```
 
 ### Skill Loading Rules
@@ -263,24 +278,81 @@ Skills are pre-digested knowledge packages that agents load on-demand. They live
 - **Progressive disclosure** — skill → doc section → full doc (only when needed)
 - Each skill has standardized format: frontmatter (`name`, `type`, `description`) + Purpose, Rules, Inputs, Outputs, Examples, Checklist
 
+### Always-Active Skills
+
+These skills apply to **every agent and every task** without explicit loading:
+
+| Skill                         | Always On | Purpose                                                               |
+| ----------------------------- | --------- | --------------------------------------------------------------------- |
+| `caveman`                     | ✅        | Compress output ~75% when user requests it — no filler, full accuracy |
+| `brainstorming`               | ✅        | Design-first gate — NEVER write code before presenting a design       |
+| `writing-plans`               | ✅        | After design approval, break into 2-5 min tasks before implementing   |
+| `subagent-driven-development` | ✅        | Dispatch fresh subagent per task with 2-stage spec + quality review   |
+| `test-driven-development`     | ✅        | No production code without a failing test first                       |
+| `rtk`                         | ✅        | Use `rtk <cmd>` for terminal output compression (60-90% savings)      |
+
+> **Superpowers shorthand:** `brainstorming` + `writing-plans` + `subagent-driven-development` + `test-driven-development` are collectively called **superpowers** and are always active.
+
 ### Agent–Skill Composition
 
-Each agent declares its skills in a `## Skills Used` section. Core skills used by most agents:
+Each agent declares its skills in a `## Skills Used` section.
 
-| Skill                | dto-guardian | integration | orchestrator | phase-builder | module-builder | refactor | conflict-resolver | merge-reviewer |
-| -------------------- | ------------ | ----------- | ------------ | ------------- | -------------- | -------- | ----------------- | -------------- |
-| dto                  | ✅           | ✅          |              | ✅            | ✅             |          | ✅                | ✅             |
-| pipeline             |              | ✅          | ✅           | ✅            |                |          | ✅                | ✅             |
-| modularity           | ✅           | ✅          |              | ✅            | ✅             | ✅       | ✅                | ✅             |
-| determinism          | ✅           |             |              | ✅            | ✅             | ✅       |                   |                |
-| idempotency          |              | ✅          | ✅           | ✅            | ✅             |          |                   | ✅             |
-| failure              |              | ✅          | ✅           | ✅            |                |          |                   |                |
-| config-validation    |              |             |              | ✅            | ✅             |          |                   |                |
-| code-quality         |              |             |              | ✅            | ✅             | ✅       |                   | ✅             |
-| database-portability |              | ✅          | ✅           | ✅            |                |          |                   | ✅             |
-| token-optimization   |              |             |              | ✅            |                |          |                   |                |
-| docs-sync            | ✅           | ✅          |              |               |                |          |                   | ✅             |
-| conflict-resolution  |              |             |              |               |                |          | ✅                |                |
+#### Core Pipeline Agents
+
+| Skill                       | dto-guardian | integration | orchestrator | phase-builder | module-builder | refactor | conflict-resolver | merge-reviewer |
+| --------------------------- | ------------ | ----------- | ------------ | ------------- | -------------- | -------- | ----------------- | -------------- | --- | ---------------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | -------------------- | --- | --- | --- | --- | --- | --- | --- | --- |
+| dto                         | ✅           | ✅          |              | ✅            | ✅             |          | ✅                | ✅             |
+| pipeline                    |              | ✅          | ✅           | ✅            |                |          | ✅                | ✅             |
+| modularity                  | ✅           | ✅          |              | ✅            | ✅             | ✅       | ✅                | ✅             |
+| determinism                 | ✅           |             |              | ✅            | ✅             | ✅       |                   |                |
+| idempotency                 |              | ✅          | ✅           | ✅            | ✅             |          |                   | ✅             |
+| failure                     |              | ✅          | ✅           | ✅            |                |          |                   |                |
+| config-validation           |              |             |              | ✅            | ✅             |          |                   |                |
+| code-quality                |              |             |              | ✅            | ✅             | ✅       |                   | ✅             |
+| coding-standards            |              |             |              | ✅            | ✅             | ✅       |                   | ✅             |     | coding-standards |     |     |     | ✅  | ✅  | ✅  |     | ✅  |     | database-portability |     | ✅  | ✅  | ✅  |     |     |     | ✅  |
+| token-optimization          |              |             |              | ✅            |                |          |                   |                |
+| brainstorming               |              |             | ✅           | ✅            | ✅             |          |                   |                |
+| writing-plans               |              |             | ✅           | ✅            |                |          |                   |                |
+| subagent-driven-development |              |             | ✅           | ✅            |                |          |                   | ✅             |
+| test-driven-development     |              |             |              |               | ✅             | ✅       |                   |                |
+| docs-sync                   | ✅           | ✅          |              |               |                |          |                   | ✅             |
+| conflict-resolution         |              |             |              |               |                |          | ✅                |                |
+
+#### Framework Agents
+
+| Skill                       | scaffold | security-auditor | test-builder | upgrade-manager | doctor |
+| --------------------------- | -------- | ---------------- | ------------ | --------------- | ------ |
+| project-scaffold            | ✅       |                  |              | ✅              |        |
+| vertical-slice              | ✅       |                  |              |                 |        |
+| config-validation           | ✅       |                  |              | ✅              | ✅     |
+| code-quality                | ✅       | ✅               | ✅           |                 |        |
+| coding-standards            | ✅       | ✅               | ✅           |                 |        |
+| modularity                  |          |                  | ✅           | ✅              | ✅     |
+| security-audit              |          | ✅               |              |                 |        |
+| dependency-analysis         |          | ✅               |              |                 | ✅     |
+| test-generation             |          |                  | ✅           |                 |        |
+| test-driven-development     |          |                  | ✅           |                 |        |
+| dto                         |          |                  | ✅           |                 |        |
+| pipeline                    |          |                  |              | ✅              |        |
+| brainstorming               | ✅       |                  |              | ✅              |        |
+| writing-plans               | ✅       |                  |              | ✅              |        |
+| subagent-driven-development | ✅       |                  |              | ✅              |        |
+| caveman                     | ✅       | ✅               | ✅           | ✅              | ✅     |
+| rtk                         | ✅       | ✅               | ✅           | ✅              | ✅     |
+| docs-sync                   |          |                  |              |                 | ✅     |
+
+#### SubAgent Delegation Map
+
+Agents delegate to specialized subagents via `runSubagent`:
+
+| Caller Agent     | Delegates To                                | Purpose                                       |
+| ---------------- | ------------------------------------------- | --------------------------------------------- |
+| scaffold         | dto-guardian, doctor                        | Validate contracts, post-init health check    |
+| security-auditor | test-builder                                | Generate tests for identified vulnerabilities |
+| test-builder     | Explore                                     | Find untested code paths                      |
+| upgrade-manager  | scaffold, doctor                            | Generate missing structure, validate result   |
+| doctor           | dto-guardian, integration, security-auditor | Deep DTO/coupling/security checks             |
+| phase-builder    | module-builder, integration                 | Build modules, wire pipeline                  |
 
 ---
 

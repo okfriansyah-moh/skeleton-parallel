@@ -105,11 +105,16 @@ MAX_REMEDIATION_RETRIES="${MAX_REMEDIATION_RETRIES:-3}"
 MAX_PARALLEL_AGENTS="${MAX_PARALLEL_AGENTS:-3}"
 
 # Agent pipeline — mandatory execution order per phase/group
-AGENT_PIPELINE=("phase-builder" "dto-guardian" "integration")
+# All five agents run for every phase: implement → validate DTOs → validate wiring → security → tests
+AGENT_PIPELINE=("phase-builder" "dto-guardian" "integration" "security-auditor" "test-builder")
 REMEDIATION_AGENT="refactor"
 
-# Core skills injected into every Copilot call
-CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency"
+# Per-agent retry limits
+MAX_RETRIES_SECURITY="${MAX_RETRIES_SECURITY:-3}"
+MAX_RETRIES_TESTS="${MAX_RETRIES_TESTS:-3}"
+
+# All 28 skills — injected into every Copilot call so agents always have full knowledge access
+CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, writing-plans, subagent-driven-development, test-driven-development, rtk"
 
 # Workspace confinement rule — injected into every agent prompt
 # Prevents agents from writing to /tmp or paths outside the project (Permission denied errors)
@@ -728,6 +733,109 @@ integration_fix() {
     return ${PIPESTATUS[0]}
 }
 
+# ── Security Auditor ──────────────────────────────────────────────────────
+
+security_auditor_execute() {
+    local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
+    cd "${work_dir}"
+    local sa_log="${LOG_DIR}/${phase_label}-security-auditor-${attempt}.log"
+    copilot \
+        -p "Perform a comprehensive OWASP-aware security audit of all code just implemented. Check: (1) injection vulnerabilities (SQL, command, path traversal), (2) insecure deserialization, (3) hardcoded secrets or credentials, (4) missing input validation at system boundaries, (5) broken access control patterns, (6) insecure dependencies or imports, (7) logging of sensitive data. Use skills: security-audit, ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. Report ALL findings with severity (critical/high/medium/low). Fix critical and high severity issues immediately. Commit fixes if any. ${_WORKSPACE_CONSTRAINT}" \
+        --agent=security-auditor \
+        --model="${model}" \
+        --no-ask-user \
+        --allow-all-tools \
+        --autopilot \
+        2>&1 | tee "${sa_log}"
+    return ${PIPESTATUS[0]}
+}
+
+security_auditor_validate() {
+    local work_dir="$1"
+    cd "${work_dir}"
+    local failures=0
+
+    # Check for common hardcoded secret patterns
+    local secret_patterns=("password\s*=\s*['\"][^'\"]{4,}" "api_key\s*=\s*['\"][^'\"]{4,}"
+                           "secret\s*=\s*['\"][^'\"]{4,}" "token\s*=\s*['\"][^'\"]{4,}")
+    for pat in "${secret_patterns[@]}"; do
+        if grep -rniE "${pat}" app/ src/ 2>/dev/null \
+                | grep -v '_test\.' | grep -v 'test/' | grep -v '.example' \
+                | grep -v '# noqa\|//\s*nosec\|//\s*nosemgrep' \
+                | head -3 | grep -q .; then
+            log_warn "[security-validate] Possible hardcoded secret (pattern: ${pat}) — review required"
+        fi
+    done
+
+    # Check for SQL string interpolation (parameterized queries required)
+    if grep -rn 'f".*SELECT\|f".*INSERT\|f".*UPDATE\|f".*DELETE\|%s.*SELECT\|%s.*INSERT' \
+            app/ src/ 2>/dev/null | grep -v '.example' | head -3 | grep -q .; then
+        log_error "[security-validate] SQL string interpolation detected — use parameterized queries"
+        ((failures++))
+    fi
+
+    # Check for shell injection via subprocess with string concat
+    if grep -rn 'subprocess.*shell=True\|os\.system(' app/ src/ 2>/dev/null | head -3 | grep -q .; then
+        log_warn "[security-validate] shell=True or os.system() detected — verify input is sanitized"
+    fi
+
+    return $(( failures > 0 ? 1 : 0 ))
+}
+
+security_auditor_fix() {
+    local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
+    cd "${work_dir}"
+    local fix_log="${LOG_DIR}/${phase_label}-security-fix-${attempt}.log"
+    copilot \
+        -p "Security validation found critical issues. Fix ONLY the security violations: replace string-interpolated SQL with parameterized queries, remove hardcoded secrets (use config/env), review shell injection risks. Use skills: security-audit, ${CORE_SKILLS}. Do not change architecture. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
+        --agent=refactor \
+        --model="${model}" \
+        --no-ask-user \
+        --allow-all-tools \
+        --autopilot \
+        2>&1 | tee "${fix_log}"
+    return ${PIPESTATUS[0]}
+}
+
+# ── Test Builder ──────────────────────────────────────────────────────────
+
+test_builder_execute() {
+    local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
+    local skill_prompt="${_CURRENT_SKILL_PROMPT}"
+    cd "${work_dir}"
+    local tb_log="${LOG_DIR}/${phase_label}-test-builder-${attempt}.log"
+    copilot \
+        -p "Generate or validate tests for all modules just implemented. Requirements: (1) all public module functions must have unit tests, (2) tests must be runnable without GPU, network, or real data files, (3) use AAA pattern (Arrange/Act/Assert), (4) mock all external dependencies, (5) test happy path and at least one error path per function, (6) deterministic — no random data, no time-dependent assertions. Use skills: test-generation, test-driven-development, ${CORE_SKILLS}. MANDATORY: Use ONLY skills as primary knowledge source. Run tests after generation to verify they pass. Fix any failing tests before committing. Commit all test files and fixes. ${_WORKSPACE_CONSTRAINT}" \
+        --agent=test-builder \
+        --model="${model}" \
+        --no-ask-user \
+        --allow-all-tools \
+        --autopilot \
+        2>&1 | tee "${tb_log}"
+    return ${PIPESTATUS[0]}
+}
+
+test_builder_validate() {
+    local work_dir="$1"
+    cd "${work_dir}"
+    run_validation_hook "${work_dir}"
+}
+
+test_builder_fix() {
+    local work_dir="$1" model="$2" phase_label="$3" attempt="$4"
+    cd "${work_dir}"
+    local fix_log="${LOG_DIR}/${phase_label}-test-fix-${attempt}.log"
+    copilot \
+        -p "Test validation failed. Fix ONLY the failing tests: correct assertions, fix mock setups, ensure tests are deterministic and network-free. Do not change production code architecture. Use skills: test-generation, test-driven-development, ${CORE_SKILLS}. Commit fixes. ${_WORKSPACE_CONSTRAINT}" \
+        --agent=refactor \
+        --model="${model}" \
+        --no-ask-user \
+        --allow-all-tools \
+        --autopilot \
+        2>&1 | tee "${fix_log}"
+    return ${PIPESTATUS[0]}
+}
+
 # ── Protected File Enforcement ────────────────────────────────────────────
 
 validate_protected_files() {
@@ -812,14 +920,30 @@ run_agent_pipeline() {
         return 1
     fi
 
-    # Step 4: protected file enforcement
+    # Step 4: security-auditor
+    if ! retry_stage "security-auditor" "${MAX_RETRIES_SECURITY}" \
+            "${phase_label}" "${model}" "${work_dir}" \
+            security_auditor_execute security_auditor_validate security_auditor_fix; then
+        rollback_to_checkpoint "${phase_label}" "security-auditor exceeded ${MAX_RETRIES_SECURITY} retries" "${work_dir}"
+        return 1
+    fi
+
+    # Step 5: test-builder
+    if ! retry_stage "test-builder" "${MAX_RETRIES_TESTS}" \
+            "${phase_label}" "${model}" "${work_dir}" \
+            test_builder_execute test_builder_validate test_builder_fix; then
+        rollback_to_checkpoint "${phase_label}" "test-builder exceeded ${MAX_RETRIES_TESTS} retries" "${work_dir}"
+        return 1
+    fi
+
+    # Step 6: protected file enforcement
     if ! validate_protected_files "${work_dir}" "${phase_label}"; then
         log_error "Protected file policy violated — rollback"
         rollback_to_checkpoint "${phase_label}" "protected file policy violation" "${work_dir}"
         return 1
     fi
 
-    # Step 5: quality gates → refactor if needed
+    # Step 7: quality gates → refactor if needed
     if ! run_quality_gates "${work_dir}"; then
         local qg_attempt=0
         while (( qg_attempt < MAX_REMEDIATION_RETRIES )); do
@@ -928,15 +1052,35 @@ generate_phase_task() {
 
 **CRITICAL:** You MUST use skills as your PRIMARY knowledge source.
 
-1. Use these skills from `.github/skills/<name>/SKILL.md` (auto-loaded by Copilot):
+1. Use these skills from `.github/skills/<name>/SKILL.md` (all are auto-loaded by Copilot):
    - `dto` — DTO registry, validation, anti-patterns
    - `pipeline` — Stage sequence, DTO flow map
    - `modularity` — Module boundaries, import rules
    - `determinism` — No-randomness enforcement
    - `idempotency` — Content-addressable IDs, ON CONFLICT DO NOTHING
-   - `database-portability` — Engine-agnostic SQL patterns
-   - `config-validation` — Config-driven parameters
+   - `failure` — Retry logic, abort thresholds, graceful degradation
+   - `config-validation` — Config-driven parameters, no hardcoded values
    - `code-quality` — Type annotations, logging, standards
+   - `coding-standards` — Naming conventions, function design, language idioms
+   - `database-portability` — Engine-agnostic SQL patterns
+   - `docs-sync` — Detect drift between code and documentation
+   - `conflict-resolution` — Git merge conflict resolution
+   - `token-optimization` — Context loading optimization
+   - `running-prompt` — Structured task execution workflow
+   - `security-audit` — OWASP security auditing, injection prevention
+   - `test-generation` — Test patterns, coverage requirements
+   - `vertical-slice` — Feature-per-folder architecture
+   - `api-design` — REST/gRPC API patterns, versioning
+   - `project-scaffold` — Project initialization validation
+   - `dependency-analysis` — Import graph, coupling analysis
+   - `migration-management` — Database migration best practices
+   - `performance-optimization` — Profiling, query optimization
+   - `caveman` — Ultra-compressed output (~75% fewer tokens)
+   - `brainstorming` — Design-first gate before implementation
+   - `writing-plans` — Break work into bite-sized tasks
+   - `subagent-driven-development` — Fresh subagent per task + 2-stage review
+   - `test-driven-development` — RED-GREEN-REFACTOR cycle enforcement
+   - `rtk` — Token-efficient CLI proxy (60-90% savings)
 2. Read `.github/copilot-instructions.md` for hard architectural constraints.
 3. **DO NOT read full documentation** unless skills are insufficient. If you do read docs, explain WHY skills were not enough.
 4. Only consult `docs/implementation_roadmap.md` for specific phase details NOT covered by skills.
@@ -960,8 +1104,10 @@ generate_phase_task() {
 After you finish implementing, the following agents run automatically with **bounded retries**:
 1. **dto-guardian** — validates all DTOs (frozen, correct fields, no drift) — up to 5 retries
 2. **integration** — validates module wiring, no cross-module imports, no raw SQL — up to 5 retries
-3. **refactor** — fixes quality gate failures (if needed) — up to 3 retries
-4. If any stage exceeds its retry limit → **rollback to checkpoint**
+3. **security-auditor** — OWASP security audit, fixes critical/high issues — up to 3 retries
+4. **test-builder** — generates/validates tests for all public functions — up to 3 retries
+5. **refactor** — fixes quality gate failures (if needed) — up to 3 retries
+6. If any stage exceeds its retry limit → **rollback to checkpoint**
 
 ---
 

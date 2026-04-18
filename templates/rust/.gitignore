@@ -1,0 +1,3 @@
+# Rust template additions
+target/
+Cargo.lock

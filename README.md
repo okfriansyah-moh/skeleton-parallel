@@ -10,39 +10,70 @@
 
 A **production-grade project skeleton** that provides:
 
-- **AI-assisted development framework** — 9 agents, 13 skills, and 5 prompts for GitHub Copilot
-- **3-mode parallel development system** — Full parallel, token-optimized, and hybrid execution
-- **Fully autonomous pipeline** — One command runs agents → union merge → review → PR creation
+- **Agent-first CLI** (`skeleton`) — Every command spawns a Copilot CLI agent that validates, fixes, and commits automatically; no human approval needed
+- **AI-assisted development framework** — 14 agents, 28 skills, and 5 prompts loaded by GitHub Copilot on demand
+- **6 language templates** — `go`, `python`, `typescript`, `nodejs`, `rust`, `java` with modular monolith architecture built-in
+- **Intelligent upgrade system** — Detects existing mechanisms, prompts Replace/Hybrid/Skip to safely merge frameworks
+- **3-mode parallel development** — Full parallel, token-optimized, and hybrid agent execution via `run_parallel.sh`
+- **Fully autonomous pipeline** — One command runs agents → union merge → review → PR creation, end-to-end
 - **Deterministic pipeline architecture** — Same input + same config = identical output
 - **Database-agnostic design** — Choose any engine; modules never touch SQL directly
 - **Self-healing retry system** — Bounded retries with checkpoint/rollback at every stage
-- **Language-agnostic architecture** — Works with Python, TypeScript, Go, or any language
 
 ## Quick Start
+
+### Option A: Using the Skeleton CLI (Recommended)
+
+```bash
+# 1. Install the framework
+git clone <this-repo>
+export PATH="$PWD/skeleton-parallel/bin:$PATH"
+
+# 2. Create a new project — spawns Copilot agent to validate structure automatically
+skeleton init go --name=my-service
+cd my-service
+
+# 3. Verify setup (auto-fix via agent if issues found)
+skeleton doctor
+
+# 4. Auto-install skills for your tech stack
+skeleton autoskills
+
+# 5. Generate your architecture
+@workspace Use .github/prompts/architecture.prompt.md to generate docs/architecture.md
+
+# 6. Generate your roadmap
+@workspace Use .github/prompts/roadmap.prompt.md to generate docs/implementation_roadmap.md
+
+# 7. Generate supporting specs
+@workspace Use .github/prompts/dto.prompt.md to generate docs/dto_contracts.md
+@workspace Use .github/prompts/orchestrator.prompt.md to generate docs/orchestrator_spec.md
+@workspace Use .github/prompts/db_adapter.prompt.md to generate docs/db_adapter_spec.md
+
+# 8. Implement Phase 0 (infrastructure)
+@phase-builder implement Phase 0
+
+# 9. Run parallel development
+./scripts/run_parallel.sh start --mode=3 1 2 3 4
+```
+
+### Option B: Manual Setup
 
 ```bash
 # 1. Clone and initialize
 git clone <this-repo> my-project
 cd my-project && git remote remove origin
 
-# 2. Generate your architecture
-# Use the prompts in .github/prompts/ with GitHub Copilot:
-@workspace Use .github/prompts/architecture.prompt.md to generate docs/architecture.md
+# 2. Follow steps 4-8 above
+```
 
-# 3. Generate your roadmap
-@workspace Use .github/prompts/roadmap.prompt.md to generate docs/implementation_roadmap.md
+### Option C: Upgrade Existing Repository
 
-# 4. Generate supporting specs
-@workspace Use .github/prompts/dto.prompt.md to generate docs/dto_contracts.md
-@workspace Use .github/prompts/orchestrator.prompt.md to generate docs/orchestrator_spec.md
-@workspace Use .github/prompts/db_adapter.prompt.md to generate docs/db_adapter_spec.md
-
-# 5. Implement Phase 0 (infrastructure)
-@phase-builder implement Phase 0
-
-# 6. Run parallel development — fully autonomous (agents → merge → PR)
-./scripts/run_parallel.sh start --mode=3 1 2 3 4
-# A pull request is created automatically when all phases pass.
+```bash
+cd existing-project
+skeleton upgrade            # Detects existing mechanisms, prompts Replace/Hybrid/Skip
+skeleton upgrade --mode=hybrid  # Force hybrid (merge additively, preserve custom files)
+skeleton doctor
 ```
 
 See [docs/STARTER_GUIDE.md](docs/STARTER_GUIDE.md) for the full walkthrough.
@@ -51,33 +82,62 @@ See [docs/STARTER_GUIDE.md](docs/STARTER_GUIDE.md) for the full walkthrough.
 
 ```
 skeleton-parallel/
+├── bin/
+│   └── skeleton                   # CLI: init, upgrade, doctor, add, list, sync, autoskills (v1.1.0)
+├── templates/                     # Language-specific project templates
+│   ├── common/                    # Shared files (README, .gitignore)
+│   ├── go/                        # Go vertical slice template
+│   ├── python/                    # Python modular monolith template
+│   ├── typescript/                # TypeScript template
+│   ├── nodejs/                    # Node.js (JavaScript) template
+│   ├── rust/                      # Rust template
+│   └── java/                      # Java template
 ├── .github/
 │   ├── copilot-instructions.md    # Architectural constraints (always loaded)
 │   ├── prompts/                   # One-shot generation prompts (5 files)
-│   ├── agents/                    # Autonomous execution agents (9 agents)
-│   │   ├── phase-builder          # Implement any phase from the roadmap
-│   │   ├── dto-guardian           # Validate DTO contracts
-│   │   ├── integration            # Wire modules, detect coupling
-│   │   ├── orchestrator           # Build/validate pipeline orchestrator
-│   │   ├── refactor               # Improve code without behavior change
-│   │   ├── module-builder         # Build individual pipeline modules
-│   │   ├── conflict-resolver      # Resolve merge conflicts (union strategy)
-│   │   ├── merge-reviewer         # Post-merge validation and review
-│   │   └── task-sync              # Structured task execution workflow
-│   └── skills/                    # Folder-based knowledge modules (13 skills)
-│       ├── dto/SKILL.md           # DTO registry and validation
-│       ├── pipeline/SKILL.md      # Stage ordering and dependencies
-│       ├── modularity/SKILL.md    # Module boundary enforcement
-│       ├── determinism/SKILL.md   # No-randomness enforcement
-│       ├── idempotency/SKILL.md   # Content-addressable IDs
-│       ├── failure/SKILL.md       # Retry, abort, degradation
-│       ├── token-optimization/    # Context compression
-│       ├── config-validation/     # Config-driven parameters
-│       ├── code-quality/          # Type annotations, logging, standards
-│       ├── conflict-resolution/   # Git merge conflict resolution
-│       ├── docs-sync/             # Documentation drift detection
-│       ├── database-portability/  # Engine-agnostic SQL
-│       └── running-prompt/        # Structured task execution
+│   ├── agents/                    # Autonomous execution agents (14 agents)
+│   │   ├── phase-builder          # Core: implement phases from roadmap
+│   │   ├── dto-guardian           # Core: validate DTO contracts
+│   │   ├── integration            # Core: wire modules, detect coupling
+│   │   ├── orchestrator           # Core: build/validate pipeline
+│   │   ├── refactor               # Core: improve without behavior change
+│   │   ├── module-builder         # Core: build individual modules
+│   │   ├── conflict-resolver      # Core: resolve merge conflicts
+│   │   ├── merge-reviewer         # Core: post-merge validation
+│   │   ├── task-sync              # Core: structured task execution
+│   │   ├── scaffold               # Framework: project initialization
+│   │   ├── security-auditor       # Framework: OWASP security review
+│   │   ├── test-builder           # Framework: generate tests
+│   │   ├── upgrade-manager        # Framework: upgrade existing repos
+│   │   └── doctor                 # Framework: health check
+│   └── skills/                    # Knowledge modules (28 skills)
+│       ├── dto/                   # Core: DTO registry and validation
+│       ├── pipeline/              # Core: stage ordering/dependencies
+│       ├── modularity/            # Core: module boundary enforcement
+│       ├── determinism/           # Core: no-randomness enforcement
+│       ├── idempotency/           # Core: content-addressable IDs
+│       ├── failure/               # Core: retry, abort, degradation
+│       ├── token-optimization/    # Core: context compression
+│       ├── config-validation/     # Core: config-driven parameters
+│       ├── code-quality/          # Core: type annotations, logging
+│       ├── conflict-resolution/   # Core: git merge resolution
+│       ├── docs-sync/             # Core: documentation drift detection
+│       ├── database-portability/  # Core: engine-agnostic SQL
+│       ├── running-prompt/        # Core: structured task execution
+│       ├── security-audit/        # Framework: OWASP auditing
+│       ├── test-generation/       # Framework: test patterns/coverage
+│       ├── vertical-slice/        # Framework: feature-per-folder
+│       ├── api-design/            # Framework: REST/gRPC patterns
+│       ├── project-scaffold/      # Framework: init validation
+│       ├── dependency-analysis/   # Framework: import graph analysis
+│       ├── migration-management/  # Framework: DB migration practices
+│       ├── performance-optimization/ # Framework: profiling patterns
+│       ├── caveman/               # Token compression: ~75% fewer output tokens
+│       ├── brainstorming/         # Design-first gate before implementation
+│       ├── writing-plans/         # Task decomposition into bite-sized steps
+│       ├── subagent-driven-development/ # Fresh subagent per task + 2-stage review
+│       ├── test-driven-development/ # RED-GREEN-REFACTOR cycle enforcement
+│       └── rtk/                   # Token-efficient CLI proxy (60-90% savings)
 ├── docs/                          # Architecture + specs (templates)
 ├── contracts/                     # Immutable DTO definitions
 ├── database/                      # DB adapter + engine implementations + migrations
@@ -206,6 +266,15 @@ Phase/group rows and post-phase pipeline stages (`post-merge-review`, `docs-sync
 
 ### All Agents
 
+| Agent | Purpose |
+| ----- | ------- |
+
+### Agents (14)
+
+`.github/agents/<name>.md` — invoked as `@<name>` in GitHub Copilot chat.
+
+#### Core Pipeline Agents
+
 | Agent             | Purpose                                        |
 | ----------------- | ---------------------------------------------- |
 | phase-builder     | Implement any phase from the roadmap           |
@@ -218,9 +287,21 @@ Phase/group rows and post-phase pipeline stages (`post-merge-review`, `docs-sync
 | merge-reviewer    | Post-merge validation and quality review       |
 | task-sync         | Structured task execution workflow             |
 
-### Skills (13)
+#### Framework Agents
+
+| Agent            | Purpose                                                        |
+| ---------------- | -------------------------------------------------------------- |
+| scaffold         | Init projects, generate boilerplate, validate structure        |
+| security-auditor | OWASP-aware security assessment with severity ratings          |
+| test-builder     | Generate unit/integration tests, enforce coverage              |
+| upgrade-manager  | Upgrade repos to skeleton-parallel; install scripts and skills |
+| doctor           | Project health check; validate skills, agents, config          |
+
+### Skills (28)
 
 Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on-demand by agents to minimize token usage while maintaining constraint enforcement.
+
+#### Core Pipeline Skills
 
 | Skill                | Purpose                                    |
 | -------------------- | ------------------------------------------ |
@@ -233,10 +314,65 @@ Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on
 | token-optimization   | Context compression, progressive loading   |
 | config-validation    | Config-driven parameters, YAML enforcement |
 | code-quality         | Type annotations, logging, code standards  |
+| coding-standards     | Naming, function design, language idioms   |
 | conflict-resolution  | Git merge conflict resolution              |
 | docs-sync            | Documentation drift detection              |
 | database-portability | Engine-agnostic SQL, adapter patterns      |
 | running-prompt       | Structured task execution workflow         |
+
+#### Framework Skills
+
+| Skill                    | Purpose                                       |
+| ------------------------ | --------------------------------------------- |
+| security-audit           | OWASP vulnerability detection and remediation |
+| test-generation          | Test patterns, coverage, AAA structure        |
+| vertical-slice           | Feature-per-folder architecture enforcement   |
+| api-design               | REST/gRPC endpoint and contract patterns      |
+| project-scaffold         | Project initialization validation             |
+| dependency-analysis      | Import graph and coupling analysis            |
+| migration-management     | Database migration best practices             |
+| performance-optimization | Profiling and throughput improvement          |
+
+#### Always-Active Skills (Superpowers)
+
+| Skill                       | Always On | Purpose                                                   |
+| --------------------------- | --------- | --------------------------------------------------------- |
+| caveman                     | ✅        | Compress output ~75% on demand — no filler, full accuracy |
+| brainstorming               | ✅        | Design-first gate — never write code without a spec       |
+| writing-plans               | ✅        | Break work into 2-5 min tasks before implementing         |
+| subagent-driven-development | ✅        | Fresh subagent per task with 2-stage quality review       |
+| test-driven-development     | ✅        | RED-GREEN-REFACTOR — no production code without a test    |
+| rtk                         | ✅        | Token-efficient CLI proxy (60-90% output savings)         |
+
+## Skeleton CLI (v1.1.0)
+
+The `skeleton` CLI is **agent-first** — every file-modifying command spawns a Copilot CLI agent that validates, auto-fixes, and commits the result. Human approval is not required.
+
+### Key Capabilities
+
+| Feature                  | Description                                                                 |
+| ------------------------ | --------------------------------------------------------------------------- |
+| **Agent spawning**       | Every command invokes a Copilot agent to validate the output automatically  |
+| **Replace/Hybrid/Skip**  | `skeleton upgrade` detects existing mechanisms and prompts upgrade strategy |
+| `--no-agent`             | Skip agent invocation for one-off commands or offline use                   |
+| `COPILOT_MODEL`          | Choose any model: `export COPILOT_MODEL=claude-sonnet-4.6`                  |
+| `SKIP_AGENT=true`        | Globally disable agent spawning across all commands                         |
+| **Tech-stack detection** | `skeleton autoskills` reads config/src files and installs matching skills   |
+| **Idempotent upgrades**  | Re-running `skeleton upgrade` on an already-upgraded repo is safe           |
+
+### Upgrade Modes
+
+| Mode      | Behavior                                                           |
+| --------- | ------------------------------------------------------------------ |
+| `replace` | Full replacement: overwrites all framework files unconditionally   |
+| `hybrid`  | Additive merge: adds missing files, preserves customized ones      |
+| `skip`    | Validation only: reports what's missing without making any changes |
+
+```bash
+skeleton upgrade               # interactive mode — prompts for Replace/Hybrid/Skip
+skeleton upgrade --mode=hybrid # force hybrid (safe for existing custom configs)
+skeleton init typescript --no-agent  # skip agent validation this time
+```
 
 ## Documentation
 
@@ -258,8 +394,8 @@ Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on
 - **Git 2.5+** — Worktree support for parallel development
 - **Python 3** — YAML config parser and validation checks
 - **VS Code + GitHub Copilot** — Agent and skill system
+- **Copilot CLI** — Required for agent spawning in `skeleton` commands (`--no-agent` to bypass)
 - **GitHub CLI (`gh`)** — PR creation (auto-installed if absent; run `gh auth login` once)
-- (Optional) Copilot CLI for automated parallel execution
 - (Optional) Language-specific lint/test tools — place in `scripts/hooks/quality-gates.sh`
 
 ## License

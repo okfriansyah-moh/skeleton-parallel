@@ -1,0 +1,12 @@
+pipeline:
+  name: "{{PROJECT_NAME}}"
+  stages: []
+
+paths:
+  output_dir: "output/"
+  database: "data/pipeline.db"
+
+thresholds:
+  max_retries: 3
+  failure_abort_pct: 50
+  min_disk_space_mb: 500

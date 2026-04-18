@@ -28,6 +28,12 @@ You are a pipeline integration specialist. Your job is to connect individually-b
 - `.github/skills/failure/SKILL.md` — failure thresholds and degradation
 - `.github/skills/database-portability/SKILL.md` — database adapter rules
 - `.github/skills/docs-sync/SKILL.md` — verify code matches specifications
+- `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
+- `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 
 ## Responsibilities
 

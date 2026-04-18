@@ -15,6 +15,10 @@ You are a DTO contract guardian. Your sole job is to ensure all DTOs in `contrac
 - `.github/skills/modularity/SKILL.md` — cross-module import rules
 - `.github/skills/determinism/SKILL.md` — ID generation and sorting rules
 - `.github/skills/docs-sync/SKILL.md` — detect drift between docs and code
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
+- `.github/skills/caveman/SKILL.md` — compressed output mode
+- `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 
 ## Responsibilities
 
