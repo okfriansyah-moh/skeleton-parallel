@@ -1270,6 +1270,15 @@ _autoskills_agent_analyze() {
     mkdir -p "$(dirname "${recommendations_file}")"
     rm -f "${recommendations_file}"
 
+    # Ensure Explore agent exists in target project (copy from skeleton if missing)
+    local explore_agent_dst="${target_dir}/.github/agents/Explore.agent.md"
+    local explore_agent_src="${SKELETON_ROOT}/.github/agents/Explore.agent.md"
+    if [[ ! -f "${explore_agent_dst}" ]] && [[ -f "${explore_agent_src}" ]]; then
+        mkdir -p "${target_dir}/.github/agents"
+        cp "${explore_agent_src}" "${explore_agent_dst}"
+        log_info "Installed Explore agent to target project"
+    fi
+
     local available_skills_list
     available_skills_list="$(get_available_skills)"
 
@@ -1539,7 +1548,7 @@ cmd_autoskills() {
 
     # ── Step 2: Agent analysis ────────────────────────────────────────────
     local recommendations_file="${target_dir}/.parallel-dev/autoskills-recommendations.txt"
-    local -a rec_names rec_actions rec_reasons
+    local -a rec_names=() rec_actions=() rec_reasons=()
 
     if _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
         log_step "Spawning agent to read and understand the codebase..."
