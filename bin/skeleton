@@ -229,23 +229,24 @@ _prompt_upgrade_mode() {
     local dir="$1"
     local mechanisms="$2"
 
-    echo ""
-    log_warn "Existing skeleton-parallel mechanisms detected:"
+    echo "" >&2
+    echo -e "${YELLOW}[WARN]${NC}  Existing skeleton-parallel mechanisms detected:" >&2
     for mech in ${mechanisms}; do
-        echo -e "    ${YELLOW}●${NC} ${mech}"
+        echo -e "    ${YELLOW}●${NC} ${mech}" >&2
     done
-    echo ""
-    echo -e "${BOLD}Choose upgrade mode:${NC}"
-    echo -e "  ${GREEN}[R]eplace${NC}  — Remove existing mechanisms, install fresh from skeleton-parallel"
-    echo -e "  ${CYAN}[H]ybrid${NC}   — Merge additively (add missing, preserve existing custom files)"
-    echo -e "  ${YELLOW}[S]kip${NC}     — Don't touch existing mechanisms, install only new components"
-    echo ""
+    echo "" >&2
+    echo -e "${BOLD}Choose upgrade mode:${NC}" >&2
+    echo -e "  ${GREEN}[R]eplace${NC}  — Remove existing mechanisms, install fresh from skeleton-parallel" >&2
+    echo -e "  ${CYAN}[H]ybrid${NC}   — Merge additively (add missing, preserve existing custom files)" >&2
+    echo -e "  ${YELLOW}[S]kip${NC}     — Don't touch existing mechanisms, install only new components" >&2
+    echo "" >&2
     read -rp "$(echo -e "${BOLD}Mode [R/H/S]: ${NC}")" mode_choice
+    # Normalize input
     case "${mode_choice,,}" in
-        r|replace)  echo "replace" ;;
-        h|hybrid)   echo "hybrid" ;;
-        s|skip)     echo "skip" ;;
-        *)          echo "hybrid" ;;  # Default to hybrid (safest)
+        r|replace)  printf 'replace' ;;
+        h|hybrid)   printf 'hybrid' ;;
+        s|skip)     printf 'skip' ;;
+        *)          printf 'hybrid' ;;  # Default to hybrid (safest)
     esac
 }
 
@@ -597,6 +598,22 @@ cmd_upgrade() {
             ;;
     esac
 
+    # ── Step 2b: Confirm no missing files remain ──────────────────────────
+    local remaining_missing=()
+    while IFS= read -r line; do
+        [[ -n "${line}" ]] && remaining_missing+=("${line}")
+    done < <(_detect_missing_files "${target_dir}")
+
+    if [[ ${#remaining_missing[@]} -eq 0 ]]; then
+        log_ok "All skeleton-parallel files are now present"
+    else
+        log_warn "${#remaining_missing[@]} file(s) still missing after upgrade:"
+        for f in "${remaining_missing[@]}"; do
+            echo -e "    ${RED}✗${NC} ${f}"
+        done
+    fi
+    echo ""
+
     # ── Step 3: Auto-detect language ──────────────────────────────────────
     log_step "Detecting project language..."
     local detected_lang
@@ -607,12 +624,12 @@ cmd_upgrade() {
         log_warn "Could not auto-detect language. Structure validation skipped."
     fi
 
-    # ── Step 4: Spawn agent for validation ────────────────────────────────
-    log_step "Spawning Copilot agent for post-upgrade validation..."
-    _spawn_copilot_agent "${target_dir}" "doctor" \
-        "You are validating an upgraded project. Check: 1) All skills/agents/prompts are installed and valid. 2) run_parallel.sh is executable and current. 3) copilot-instructions.md is present. 4) phases.yaml is configured. 5) Project structure follows skeleton-parallel standards for ${detected_lang:-unknown} language. 6) All docs templates are present. Fix any issues found. After fixing, commit changes with message 'chore: post-upgrade validation fixes'." \
-        "upgrade-validation" || \
-        log_warn "Post-upgrade agent validation skipped — run 'skeleton doctor --dir=${target_dir}' manually to verify."
+    # ── Step 4: Spawn agent for post-upgrade adaptation ───────────────────
+    log_step "Spawning Copilot agent for post-upgrade adaptation..."
+    _spawn_copilot_agent "${target_dir}" "upgrade-manager" \
+        "The skeleton-parallel framework files have just been installed into this ${detected_lang:-unknown} project. Your job: 1) Verify all installed files are correct and complete (.github/skills, .github/agents, .github/prompts, copilot-instructions.md, scripts/run_parallel.sh, config/phases.yaml, docs/ templates). 2) Check that the project's existing code follows skeleton-parallel modular monolith standards (contracts/ for DTOs, database/ for adapter, app/modules/ or src/modules/ or internal/modules/ for domain modules). 3) Fix any structural violations found — move files to correct locations, add missing boilerplate. 4) Validate the health module reference implementation is present and wired. 5) Commit all fixes with message 'chore: post-upgrade adaptation'. Run 'skeleton doctor' if available to confirm all checks pass." \
+        "upgrade-adaptation" || \
+        log_warn "Post-upgrade agent skipped — agents not yet available in this context. Run 'skeleton doctor --dir=${target_dir}' after opening the project in VS Code."
 
     echo ""
     log_ok "Upgrade complete!"
