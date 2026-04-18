@@ -41,6 +41,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
@@ -522,11 +523,82 @@ _post_init_setup() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: upgrade — helper: spawn Explore to analyze project before install
+# Writes .parallel-dev/upgrade-context.md for use by upgrade-manager
+# ═════════════════════════════════════════════════════════════════════════════
+_upgrade_analyze_context() {
+    local target_dir="$1"
+    local detected_lang="$2"
+    local context_file="${target_dir}/.parallel-dev/upgrade-context.md"
+
+    mkdir -p "${target_dir}/.parallel-dev/agent-logs"
+
+    # Ensure Explore agent exists in target project (may not be installed yet)
+    local explore_agent_dst="${target_dir}/.github/agents/Explore.agent.md"
+    local explore_agent_src="${SKELETON_ROOT}/.github/agents/Explore.agent.md"
+    if [[ ! -f "${explore_agent_dst}" ]] && [[ -f "${explore_agent_src}" ]]; then
+        mkdir -p "${target_dir}/.github/agents"
+        cp "${explore_agent_src}" "${explore_agent_dst}"
+        log_info "Installed Explore agent to target project (for pre-upgrade analysis)"
+    fi
+
+    _spawn_copilot_agent "${target_dir}" "Explore" \
+        "Analyze this ${detected_lang:-unknown} project BEFORE skeleton-parallel installation. Write a structured report to .parallel-dev/upgrade-context.md covering:
+
+## 1. Project Structure
+- Actual source layout (module/package directories, entry points)
+- Detected domains/features — list each as a potential parallel-dev phase
+- Language version and key runtime dependencies
+
+## 2. Database
+- Database engine (postgres, sqlite, mysql, etc.) if any
+- Migration tool in use (flyway, alembic, goose, liquibase, etc.)
+- ORM or query builder in use
+
+## 3. Testing
+- Test framework(s) and test runner commands
+- Location of test files
+- CI configuration (GitHub Actions, CircleCI, Jenkins, etc.)
+
+## 4. Git & Collaboration
+- Git remote URL and platform (GitHub, GitLab, Bitbucket)
+- Default branch name (main, master, etc.)
+- Existing branch naming conventions
+- PR/MR label conventions if any
+
+## 5. Existing Scripts & Automation
+- Makefile targets or scripts that overlap with run_parallel.sh
+- Any existing parallel/concurrent task runners or CI pipeline definitions
+
+## 6. Phase Candidates
+- List 3-8 concrete phase names derived from the actual codebase structure
+- Each entry: phase name, what it implements, rough dependency order
+- Example: 'phase-auth: JWT authentication layer, depends on phase-db'
+
+## 7. config/phases.yaml Suggestions
+- Propose the phases.yaml 'phases:' block tailored to this project's domains
+- Use actual module names, not generic placeholders
+
+## 8. scripts/run_parallel.sh Adaptation Notes
+- Any env vars that need to change (PR_LABEL, DEFAULT_BRANCH, etc.)
+- Integration branch naming that fits the project's conventions
+
+## 9. Upgrade Risks
+- Files or patterns that might conflict with skeleton-parallel conventions
+- Any non-standard structures that need special handling during upgrade
+
+Write the complete report to: .parallel-dev/upgrade-context.md
+Do NOT modify any other project files." \
+        "upgrade-context-analysis"
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
 # COMMAND: upgrade
 # ═════════════════════════════════════════════════════════════════════════════
 cmd_upgrade() {
     local target_dir="."
     local force_mode=""
+    local no_analyze=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -534,6 +606,7 @@ cmd_upgrade() {
             --dir)        target_dir="${2}"; shift 2 ;;
             --mode=*)     force_mode="${1#*=}"; shift ;;
             --no-agent)   SKIP_AGENT=true; shift ;;
+            --no-analyze) no_analyze=true; shift ;;
             -*)           die "Unknown option: $1" ;;
             *)            target_dir="$1"; shift ;;
         esac
@@ -549,7 +622,34 @@ cmd_upgrade() {
     log_info "Target: ${BOLD}${target_dir}${NC}"
     echo ""
 
-    # ── Step 1: Detect existing mechanisms ────────────────────────────────
+    # ── Step 0: Detect language ────────────────────────────────────────────
+    log_step "Detecting project language..."
+    local detected_lang
+    detected_lang="$(_detect_language "${target_dir}")"
+    if [[ -n "${detected_lang}" ]]; then
+        log_ok "Detected language: ${BOLD}${detected_lang}${NC}"
+    else
+        log_warn "Could not auto-detect language."
+    fi
+    echo ""
+
+    # ── Step 1: Pre-upgrade analysis (Explore agent) ──────────────────────
+    local context_file="${target_dir}/.parallel-dev/upgrade-context.md"
+    if _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]] && [[ "${no_analyze}" != "true" ]]; then
+        if [[ -f "${context_file}" ]]; then
+            log_info "Pre-upgrade analysis already exists — skipping (use --no-analyze to skip, or delete .parallel-dev/upgrade-context.md to re-run)"
+        else
+            log_step "Spawning Explore agent to analyze project before installing..."
+            log_info "The agent will explore the project and write a context report."
+            echo ""
+            _upgrade_analyze_context "${target_dir}" "${detected_lang}" || true
+        fi
+    elif [[ "${no_analyze}" == "true" ]]; then
+        log_info "Pre-upgrade analysis skipped (--no-analyze)"
+    fi
+    echo ""
+
+    # ── Step 2: Detect existing mechanisms ────────────────────────────────
     log_step "Detecting existing skeleton-parallel mechanisms..."
     local existing_mechanisms
     existing_mechanisms="$(_detect_existing_mechanisms "${target_dir}")"
@@ -614,20 +714,27 @@ cmd_upgrade() {
     fi
     echo ""
 
-    # ── Step 3: Auto-detect language ──────────────────────────────────────
-    log_step "Detecting project language..."
-    local detected_lang
-    detected_lang="$(_detect_language "${target_dir}")"
-    if [[ -n "${detected_lang}" ]]; then
-        log_ok "Detected language: ${BOLD}${detected_lang}${NC}"
+    # ── Step 3: Spawn upgrade-manager for context-aware post-upgrade adaptation ──
+    log_step "Spawning upgrade-manager agent for context-aware adaptation..."
+    local context_hint=""
+    if [[ -f "${context_file}" ]]; then
+        context_hint="A pre-upgrade analysis report is available at .parallel-dev/upgrade-context.md — READ IT FIRST before making any decisions. Use the Phase Candidates, config/phases.yaml Suggestions, and Adaptation Notes sections to customize installed files for this specific project."
     else
-        log_warn "Could not auto-detect language. Structure validation skipped."
+        context_hint="No pre-upgrade analysis report was generated. Analyze the project structure yourself before making changes."
     fi
-
-    # ── Step 4: Spawn agent for post-upgrade adaptation ───────────────────
-    log_step "Spawning Copilot agent for post-upgrade adaptation..."
     _spawn_copilot_agent "${target_dir}" "upgrade-manager" \
-        "The skeleton-parallel framework files have just been installed into this ${detected_lang:-unknown} project. Your job: 1) Verify all installed files are correct and complete (.github/skills, .github/agents, .github/prompts, copilot-instructions.md, scripts/run_parallel.sh, config/phases.yaml, docs/ templates). 2) Check that the project's existing code follows skeleton-parallel modular monolith standards (contracts/ for DTOs, database/ for adapter, app/modules/ or src/modules/ or internal/modules/ for domain modules). 3) Fix any structural violations found — move files to correct locations, add missing boilerplate. 4) Validate the health module reference implementation is present and wired. 5) Commit all fixes with message 'chore: post-upgrade adaptation'. Run 'skeleton doctor' if available to confirm all checks pass." \
+        "The skeleton-parallel framework files have just been installed into this ${detected_lang:-unknown} project. ${context_hint}
+
+Your job:
+1) READ .parallel-dev/upgrade-context.md (if present) to understand the actual project structure.
+2) Adapt config/phases.yaml — replace generic phase placeholders with the actual phase names and dependencies found in the codebase. Use the 'Phase Candidates' and 'config/phases.yaml Suggestions' sections from the context report.
+3) Adapt scripts/run_parallel.sh env vars — set DEFAULT_BRANCH, PR_LABEL, and any other vars to match the project's Git conventions from the context report.
+4) Verify all installed files are correct (.github/skills, .github/agents, .github/prompts, copilot-instructions.md, run_parallel.sh, phases.yaml, docs/ templates).
+5) Check that the project's existing code follows skeleton-parallel modular monolith standards (contracts/ for DTOs, database/ for adapter, app/modules/ or src/modules/ or internal/modules/ for domain modules).
+6) Fix any structural violations — move files to correct locations, add missing boilerplate.
+7) Validate that scripts/run_parallel.sh would run successfully end-to-end: correct branch names, valid phase config, working git remote, gh CLI available for PR creation.
+8) Commit all adaptations with message 'chore: post-upgrade adaptation (context-aware)'.
+9) Run 'skeleton doctor' to confirm all checks pass." \
         "upgrade-adaptation" || \
         log_warn "Post-upgrade agent skipped — agents not yet available in this context. Run 'skeleton doctor --dir=${target_dir}' after opening the project in VS Code."
 
@@ -1391,6 +1498,140 @@ _autoskills_static_map() {
     done
 }
 
+# ── Helper: spawn agent to generate domain-specific custom skills
+# Identifies patterns unique to the project's domain (e.g. payment, crypto, video),
+# writes .github/skills/<name>/SKILL.md for each, and produces a manifest.
+_autoskills_agent_plan_domain() {
+    local target_dir="$1"
+    local detected_lang="$2"
+    local features_str="$3"
+    local manifest_file="$4"
+
+    mkdir -p "$(dirname "${manifest_file}")"
+    rm -f "${manifest_file}"
+
+    # Ensure Explore agent is present in target project
+    local explore_agent_dst="${target_dir}/.github/agents/Explore.agent.md"
+    local explore_agent_src="${SKELETON_ROOT}/.github/agents/Explore.agent.md"
+    if [[ ! -f "${explore_agent_dst}" ]] && [[ -f "${explore_agent_src}" ]]; then
+        mkdir -p "${target_dir}/.github/agents"
+        cp "${explore_agent_src}" "${explore_agent_dst}"
+    fi
+
+    _spawn_copilot_agent "${target_dir}" "Explore" \
+        "Analyze this ${detected_lang:-unknown} project (features: ${features_str:-none}) and IDENTIFY domain-specific skill areas for coding patterns UNIQUE to this project.
+
+SKELETON SKILLS ALREADY AVAILABLE — do NOT plan skills that duplicate these domains:
+dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality,
+coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization,
+running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold,
+dependency-analysis, migration-management, performance-optimization, caveman, brainstorming,
+writing-plans, subagent-driven-development, test-driven-development, rtk
+
+INSTRUCTIONS:
+1. Explore key source files to understand the project's business domain and unique technical patterns
+2. Identify 3-7 domain-specific skill areas NOT covered by the skeleton skills above
+   Examples of good domain skills:
+   - Crypto/blockchain project  → 'crypto-key-management', 'blockchain-transaction-patterns'
+   - Payment system             → 'payment-processing', 'pci-compliance-patterns'
+   - Video pipeline             → 'ffmpeg-encoding-patterns', 'gpu-worker-patterns'
+   - AI/ML project              → 'prompt-safety-patterns', 'model-inference-constraints'
+   - Multi-tenant SaaS          → 'tenant-isolation-patterns', 'subscription-billing-rules'
+   - Supabase project           → 'supabase-rls-patterns', 'supabase-migration-conventions'
+3. Write ONLY the manifest file — do NOT create any .github/skills/ directories or SKILL.md files.
+   The manifest will be reviewed by the user before any files are created.
+
+MANIFEST FILE to write: ${manifest_file}
+Format — one line per skill, pipe-separated, NO extra whitespace:
+skill-name|one-sentence description of what it covers and why it is unique to this project
+Example:
+supabase-rls-patterns|Row-level security enforcement for multi-tenant Supabase queries
+ffmpeg-encoding-patterns|FFmpeg subprocess constraints and output path safety rules
+
+RULES:
+- Plan 3-7 skills MAXIMUM — quality over quantity
+- Every planned skill MUST be justified by actual files, functions, or patterns found in THIS codebase
+- Do NOT plan generic skills that could apply to any project
+- Do NOT duplicate any skeleton skill domain listed above
+- Skill names: lowercase, hyphenated, domain-specific (e.g. 'crypto-key-management', not 'security')
+- Do NOT write any files other than the manifest" \
+        "autoskills-domain-planning"
+}
+
+_autoskills_agent_generate_domain() {
+    local target_dir="$1"
+    local detected_lang="$2"
+    local features_str="$3"
+    local manifest_file="$4"
+
+    mkdir -p "${target_dir}/.github/skills"
+
+    # Ensure Explore agent is present in target project
+    local explore_agent_dst="${target_dir}/.github/agents/Explore.agent.md"
+    local explore_agent_src="${SKELETON_ROOT}/.github/agents/Explore.agent.md"
+    if [[ ! -f "${explore_agent_dst}" ]] && [[ -f "${explore_agent_src}" ]]; then
+        mkdir -p "${target_dir}/.github/agents"
+        cp "${explore_agent_src}" "${explore_agent_dst}"
+    fi
+
+    # Read planned skill names from the manifest to guide generation
+    local planned_skills=""
+    if [[ -f "${manifest_file}" ]]; then
+        planned_skills="$(awk -F'|' '{print $1}' "${manifest_file}" | tr '\n' ',' | sed 's/,$//') "
+    fi
+
+    _spawn_copilot_agent "${target_dir}" "Explore" \
+        "Generate domain-specific SKILL.md files for this ${detected_lang:-unknown} project (features: ${features_str:-none}).
+
+The user has already approved generating these domain skills: ${planned_skills:-see manifest at ${manifest_file}}
+
+SKELETON SKILLS ALREADY INSTALLED — do NOT generate skills that duplicate these domains:
+dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality,
+coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization,
+running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold,
+dependency-analysis, migration-management, performance-optimization, caveman, brainstorming,
+writing-plans, subagent-driven-development, test-driven-development, rtk
+
+INSTRUCTIONS:
+1. If a manifest exists at ${manifest_file}, generate ONLY the skills listed there
+2. For each domain skill, create .github/skills/<skill-name>/SKILL.md using this EXACT format:
+
+---
+name: <skill-name>
+type: skill
+description: \"<one-line description of what this skill enforces>\"
+---
+
+## Purpose
+
+[What this skill enforces and why it exists in THIS project — reference actual files]
+
+## Rules
+
+[5-10 specific, actionable rules derived from patterns found in THIS codebase.
+ Reference specific files, functions, or line numbers you observed.]
+
+## Anti-Patterns
+
+[3-5 things to NEVER do in this domain, with examples from THIS codebase]
+
+## Checklist
+
+\`\`\`
+[ ] Specific rule 1
+[ ] Specific rule 2
+...\`\`\`
+
+RULES:
+- Generate 3-7 skills MAXIMUM — quality over quantity
+- Every rule MUST reference actual files, functions, or patterns found in THIS codebase
+- Do NOT generate generic skills that could apply to any project
+- Do NOT duplicate any skeleton skill domain listed above
+- Skill names: lowercase, hyphenated, domain-specific (e.g. 'crypto-key-management', not 'security')
+- Do NOT modify any project source files — only write to .github/skills/" \
+        "autoskills-domain-generation"
+}
+
 # ── Helper: install a skill fresh from skeleton
 _autoskills_install_skill() {
     local skill="$1"
@@ -1548,14 +1789,24 @@ cmd_autoskills() {
 
     # ── Step 2: Agent analysis ────────────────────────────────────────────
     local recommendations_file="${target_dir}/.parallel-dev/autoskills-recommendations.txt"
+    local domain_manifest="${target_dir}/.parallel-dev/domain-skills-manifest.txt"
     local -a rec_names=() rec_actions=() rec_reasons=()
+    local -a domain_names=() domain_reasons=()
+    local features_str="${features[*]+"${features[*]}"}"
 
     if _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
         log_step "Spawning agent to read and understand the codebase..."
         log_info "The agent will explore the project and recommend only skills that fit."
         echo ""
-        local features_str="${features[*]+"${features[*]}"}"
         _autoskills_agent_analyze "${target_dir}" "${detected_lang}" "${features_str}" "${recommendations_file}" || true
+    fi
+
+    # ── Step 2b: Domain-specific skill planning (manifest only — no files written yet) ──
+    if _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]] && [[ "${dry_run}" != "true" ]]; then
+        log_step "Spawning agent to identify domain-specific skills..."
+        log_info "The agent will explore the project and plan custom skills — no files created until you confirm."
+        echo ""
+        _autoskills_agent_plan_domain "${target_dir}" "${detected_lang}" "${features_str}" "${domain_manifest}" || true
     fi
 
     # ── Step 3: Parse agent recommendations ──────────────────────────────
@@ -1576,6 +1827,19 @@ cmd_autoskills() {
         done < "${recommendations_file}"
     fi
 
+    # ── Step 3b: Parse domain skill plan ──────────────────────────────────
+    if [[ -f "${domain_manifest}" ]]; then
+        while IFS='|' read -r name reason; do
+            name="${name// /}"
+            [[ -z "${name}" || "${name}" =~ ^# ]] && continue
+            domain_names+=("${name}")
+            domain_reasons+=("${reason}")
+        done < "${domain_manifest}"
+        if [[ ${#domain_names[@]} -gt 0 ]]; then
+            log_ok "Domain skills planned: ${BOLD}${#domain_names[@]}${NC}"
+        fi
+    fi
+
     # ── Step 4: Fallback to static map if no agent output ─────────────────
     if [[ ${#rec_names[@]} -eq 0 ]]; then
         if _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
@@ -1591,29 +1855,35 @@ cmd_autoskills() {
         done < <(_autoskills_static_map "${detected_lang}" "${target_dir}" "${features[@]+"${features[@]}"}")
     fi
 
-    if [[ ${#rec_names[@]} -eq 0 ]]; then
+    if [[ ${#rec_names[@]} -eq 0 ]] && [[ ${#domain_names[@]} -eq 0 ]]; then
         log_ok "No skills recommended — project is up to date or no matches found."
         echo ""
         return 0
     fi
 
     # ── Step 5: Show plan with reasons ────────────────────────────────────
+    local total_skills=$(( ${#rec_names[@]} + ${#domain_names[@]} ))
     echo ""
-    log_step "Recommended skills (${#rec_names[@]}):"
+    log_step "Recommended skills (${total_skills}):"
     echo ""
     for i in "${!rec_names[@]}"; do
         local action_label
         case "${rec_actions[$i]}" in
-            install) action_label="${GREEN}[install]${NC}" ;;
-            merge)   action_label="${CYAN}[merge]  ${NC}" ;;
-            *)       action_label="[${rec_actions[$i]}]" ;;
+            install) action_label="${GREEN}[install]  ${NC}" ;;
+            merge)   action_label="${CYAN}[merge]    ${NC}" ;;
+            *)       action_label="[${rec_actions[$i]}]    " ;;
         esac
         echo -e "  ${action_label} ${BOLD}${rec_names[$i]}${NC}"
-        echo -e "           ${rec_reasons[$i]}"
+        echo -e "             ${rec_reasons[$i]}"
+    done
+    for i in "${!domain_names[@]}"; do
+        echo -e "  ${MAGENTA}[generate] ${NC} ${BOLD}${domain_names[$i]}${NC}"
+        echo -e "             ${domain_reasons[$i]}"
     done
     echo ""
-    echo -e "  ${GREEN}[install]${NC} = fresh copy from skeleton-parallel"
-    echo -e "  ${CYAN}[merge]  ${NC} = existing skill combined with skeleton version (custom sections preserved)"
+    echo -e "  ${GREEN}[install]${NC}  = fresh copy from skeleton-parallel"
+    echo -e "  ${CYAN}[merge]${NC}    = existing skill combined with skeleton version (custom sections preserved)"
+    echo -e "  ${MAGENTA}[generate]${NC} = new domain-specific skill generated for this project"
     echo ""
 
     if [[ "${dry_run}" == true ]]; then
@@ -1625,7 +1895,9 @@ cmd_autoskills() {
     # ── Step 6: Confirmation ──────────────────────────────────────────────
     if [[ "${auto_yes}" != true ]]; then
         echo -e "${BOLD}Options:${NC}"
-        echo -e "  ${GREEN}[y]${NC} Install all ${#rec_names[@]} recommended skills"
+        local domain_note=""
+        [[ ${#domain_names[@]} -gt 0 ]] && domain_note=" + generate ${#domain_names[@]} domain skills"
+        echo -e "  ${GREEN}[y]${NC} Install all ${#rec_names[@]} skeleton skills${domain_note}"
         echo -e "  ${YELLOW}[i]${NC} Choose individually (confirm each skill)"
         echo -e "  ${RED}[n]${NC} Abort"
         echo ""
@@ -1650,13 +1922,23 @@ cmd_autoskills() {
                         sel_reasons+=("${rec_reasons[$i]}")
                     fi
                 done
-                if [[ ${#sel_names[@]} -eq 0 ]]; then
+                if [[ ${#domain_names[@]} -gt 0 ]]; then
+                    echo ""
+                    printf "%b" "  ${MAGENTA}${#domain_names[@]} domain skill(s)${NC} planned for generation.\n"
+                    printf "%b" "  Generate all domain skills? [y/N]: "
+                    read -r domain_choice
+                    if [[ "${domain_choice,,}" != "y" ]]; then
+                        domain_names=()
+                        domain_reasons=()
+                    fi
+                fi
+                if [[ ${#sel_names[@]} -eq 0 ]] && [[ ${#domain_names[@]} -eq 0 ]]; then
                     log_info "Nothing selected. Aborted."
                     echo ""
                     return 0
                 fi
-                rec_names=("${sel_names[@]}")
-                rec_actions=("${sel_actions[@]}")
+                rec_names=("${sel_names[@]+"${sel_names[@]}"}") 
+                rec_actions=("${sel_actions[@]+"${sel_actions[@]}"}") 
                 rec_reasons=("${sel_reasons[@]+"${sel_reasons[@]}"}")
                 ;;
             *)
@@ -1670,7 +1952,7 @@ cmd_autoskills() {
     # ── Step 7: Install / merge ───────────────────────────────────────────
     echo ""
     mkdir -p "${target_dir}/.github/skills"
-    local installed=0 merged=0 failed=0
+    local installed=0 merged=0 generated=0 failed=0
     for i in "${!rec_names[@]}"; do
         case "${rec_actions[$i]}" in
             install)
@@ -1682,11 +1964,27 @@ cmd_autoskills() {
         esac
     done
 
+    # ── Step 7b: Generate domain skills (now that user has confirmed) ─────
+    if [[ ${#domain_names[@]} -gt 0 ]] && _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
+        echo ""
+        log_step "Generating ${#domain_names[@]} domain-specific skill(s)..."
+        _autoskills_agent_generate_domain "${target_dir}" "${detected_lang}" "${features_str}" "${domain_manifest}" || true
+        # Count how many were actually created
+        for name in "${domain_names[@]}"; do
+            [[ -f "${target_dir}/.github/skills/${name}/SKILL.md" ]] && ((generated++))
+        done
+    elif [[ ${#domain_names[@]} -gt 0 ]]; then
+        log_warn "Copilot not available — domain skills not generated."
+    fi
+
     echo ""
-    log_ok "Done. ${BOLD}${installed}${NC} installed, ${BOLD}${merged}${NC} merged, ${BOLD}${failed}${NC} failed."
+    log_ok "Done. ${BOLD}${installed}${NC} installed, ${BOLD}${merged}${NC} merged, ${BOLD}${generated}${NC} generated, ${BOLD}${failed}${NC} failed."
     if [[ ${merged} -gt 0 ]] && _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
         log_info "Merge agents are running in the background."
         log_info "Check .parallel-dev/agent-logs/ for merge results."
+    fi
+    if [[ ${generated} -gt 0 ]]; then
+        log_info "Domain skills are in .github/skills/ — review and customize them for this project."
     fi
     echo ""
 }
@@ -1727,6 +2025,7 @@ cmd_help() {
     --dir=DIR                 Target directory (default: .)
     --mode=MODE               Force upgrade mode: replace, hybrid, or skip
     --no-agent                Skip Copilot agent spawning
+    --no-analyze              Skip pre-upgrade Explore analysis (use existing context report if present)
 
   AGENT BEHAVIOR:
     By default, file-modifying commands (init, upgrade, doctor, sync, add,
