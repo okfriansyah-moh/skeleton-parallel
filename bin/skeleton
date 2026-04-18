@@ -198,6 +198,31 @@ _detect_existing_mechanisms() {
     echo "${found[*]}"
 }
 
+# Detect missing skeleton-parallel files in a directory
+# Prints each missing path (relative to dir), one per line
+_detect_missing_files() {
+    local dir="$1"
+
+    # .github components
+    [[ ! -f "${dir}/.github/copilot-instructions.md" ]] && echo ".github/copilot-instructions.md"
+    [[ ! -d "${dir}/.github/skills" ]]                   && echo ".github/skills/"
+    [[ ! -d "${dir}/.github/agents" ]]                   && echo ".github/agents/"
+    [[ ! -d "${dir}/.github/prompts" ]]                  && echo ".github/prompts/"
+
+    # Scripts
+    [[ ! -f "${dir}/scripts/run_parallel.sh" ]] && echo "scripts/run_parallel.sh"
+
+    # Config
+    [[ ! -f "${dir}/config/phases.yaml" ]] && echo "config/phases.yaml"
+
+    # Docs
+    for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+               dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+               AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+        [[ ! -f "${dir}/docs/${doc}" ]] && echo "docs/${doc}"
+    done
+}
+
 # Prompt user for upgrade mode when existing mechanisms are detected
 # Returns: "replace", "hybrid", or "skip"
 _prompt_upgrade_mode() {
@@ -528,6 +553,23 @@ cmd_upgrade() {
     local existing_mechanisms
     existing_mechanisms="$(_detect_existing_mechanisms "${target_dir}")"
 
+    # Report missing files before deciding upgrade mode
+    local missing_files=()
+    while IFS= read -r line; do
+        [[ -n "${line}" ]] && missing_files+=("${line}")
+    done < <(_detect_missing_files "${target_dir}")
+
+    if [[ ${#missing_files[@]} -gt 0 ]]; then
+        echo ""
+        log_warn "Missing skeleton-parallel files detected (${#missing_files[@]} item(s)):"
+        for f in "${missing_files[@]}"; do
+            echo -e "    ${RED}✗${NC} ${f}"
+        done
+        echo ""
+    else
+        log_ok "All skeleton-parallel files present"
+    fi
+
     local upgrade_mode="replace"
     if [[ -n "${existing_mechanisms}" ]]; then
         if [[ -n "${force_mode}" ]]; then
@@ -569,7 +611,8 @@ cmd_upgrade() {
     log_step "Spawning Copilot agent for post-upgrade validation..."
     _spawn_copilot_agent "${target_dir}" "doctor" \
         "You are validating an upgraded project. Check: 1) All skills/agents/prompts are installed and valid. 2) run_parallel.sh is executable and current. 3) copilot-instructions.md is present. 4) phases.yaml is configured. 5) Project structure follows skeleton-parallel standards for ${detected_lang:-unknown} language. 6) All docs templates are present. Fix any issues found. After fixing, commit changes with message 'chore: post-upgrade validation fixes'." \
-        "upgrade-validation"
+        "upgrade-validation" || \
+        log_warn "Post-upgrade agent validation skipped — run 'skeleton doctor --dir=${target_dir}' manually to verify."
 
     echo ""
     log_ok "Upgrade complete!"
@@ -698,10 +741,11 @@ _upgrade_hybrid() {
                AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
         if [[ ! -f "${target_dir}/docs/${doc}" ]] && [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
             cp "${SKELETON_ROOT}/docs/${doc}" "${target_dir}/docs/"
+            log_ok "Installed docs/${doc}"
             ((docs_installed++))
         fi
     done
-    log_ok "Installed ${docs_installed} new doc templates"
+    [[ ${docs_installed} -eq 0 ]] && log_warn "All doc templates already present — nothing to install"
 
     # Output directory
     mkdir -p "${target_dir}/output"
@@ -771,10 +815,11 @@ _upgrade_skip() {
                AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
         if [[ ! -f "${target_dir}/docs/${doc}" ]] && [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
             cp "${SKELETON_ROOT}/docs/${doc}" "${target_dir}/docs/"
+            log_ok "Installed docs/${doc}"
             ((docs_installed++))
         fi
     done
-    log_ok "Installed ${docs_installed} new doc templates"
+    [[ ${docs_installed} -eq 0 ]] && log_warn "All doc templates already present — nothing to install"
 
     # Output directory
     mkdir -p "${target_dir}/output"
