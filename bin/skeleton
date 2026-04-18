@@ -1257,6 +1257,220 @@ cmd_sync() {
 # ═════════════════════════════════════════════════════════════════════════════
 # COMMAND: autoskills
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ── Helper: spawn agent to analyze target codebase and produce recommendations
+# Writes to recommendations_file: one line per skill → name|action|reason
+# action: install | merge
+_autoskills_agent_analyze() {
+    local target_dir="$1"
+    local detected_lang="$2"
+    local features_str="$3"
+    local recommendations_file="$4"
+
+    mkdir -p "$(dirname "${recommendations_file}")"
+    rm -f "${recommendations_file}"
+
+    local available_skills_list
+    available_skills_list="$(get_available_skills)"
+
+    _spawn_copilot_agent "${target_dir}" "Explore" \
+        "Analyze this ${detected_lang:-unknown} project (detected features: ${features_str:-none}) and decide which skeleton-parallel skills to recommend installing.
+
+AVAILABLE SKILLS TO EVALUATE (one per line):
+${available_skills_list}
+
+SKILL REFERENCE (name → what it does):
+running-prompt: structured task execution workflow (planning, security review, verification)
+brainstorming: design-first gate — present a design before any implementation
+writing-plans: convert approved design into bite-sized implementation tasks
+subagent-driven-development: dispatch fresh subagent per task + 2-stage review
+test-driven-development: RED-GREEN-REFACTOR cycle enforcement
+code-quality: type annotations, structured logging, no anti-patterns
+coding-standards: naming conventions, function design, language idioms
+security-audit: OWASP Top 10 vulnerability detection and remediation
+modularity: module boundary enforcement, no cross-module imports
+dto: immutable DTO contracts, validation, producer/consumer mapping
+determinism: same input + same config = identical output enforcement
+idempotency: no duplicate writes, content-addressable IDs, ON CONFLICT
+failure: retry policies, abort thresholds, graceful degradation
+database-portability: engine-agnostic SQL, no driver leakage into modules
+migration-management: safe append-only schema migrations
+config-validation: YAML-driven parameters, no hardcoded values in code
+test-generation: unit/integration test patterns, AAA structure, mocking
+api-design: REST/gRPC endpoint patterns, error responses, versioning
+vertical-slice: feature-per-folder self-contained architecture
+pipeline: stage ordering, DTO flow, checkpoint dependencies
+docs-sync: detect drift between documentation and code
+dependency-analysis: import graph validation, coupling metrics
+conflict-resolution: git merge conflict resolution for parallel branches
+token-optimization: context loading optimization for agent prompts
+performance-optimization: profiling, query optimization, throughput
+rtk: token-efficient CLI proxy for terminal output compression
+caveman: ultra-compressed output mode (~75% fewer tokens)
+project-scaffold: project initialization and structure validation
+
+INSTRUCTIONS:
+1. Explore the project: read key source files, directory structure, existing .github/skills/ (if any)
+2. For each skill above, decide one of:
+   - install: skill is clearly beneficial and NOT yet present in .github/skills/
+   - merge: skill ALREADY EXISTS in .github/skills/ but skeleton version adds missing value
+   - skip: skill is irrelevant to this project's actual stack, patterns, or purpose
+3. ONLY output install and merge decisions (skip means exclude)
+4. Write results to: .parallel-dev/autoskills-recommendations.txt
+5. Format — one line per skill, pipe-separated, NO extra whitespace:
+   skill-name|action|specific reason citing actual files or patterns found
+6. Example lines:
+   security-audit|install|Found HTTP handlers in internal/web/server.go without input validation
+   running-prompt|merge|Existing SKILL.md present but missing security-review phase
+   database-portability|skip|No database access detected
+7. Reason MUST be specific to what you actually found — do NOT use generic reasons
+8. Do NOT modify any project files other than creating .parallel-dev/autoskills-recommendations.txt" \
+        "autoskills-analysis"
+}
+
+# ── Helper: static skill mapping fallback (when no Copilot CLI)
+# Prints lines: name|action|reason
+_autoskills_static_map() {
+    local detected_lang="$1"
+    local target_dir="$2"
+    shift 2
+    local features=("$@")
+
+    local -a skills
+    skills=("running-prompt" "code-quality" "coding-standards" "security-audit"
+            "token-optimization" "brainstorming" "writing-plans" "subagent-driven-development")
+
+    case "${detected_lang}" in
+        go|python|rust)
+            skills+=("modularity" "dto" "determinism" "idempotency" "failure"
+                     "database-portability" "migration-management"
+                     "config-validation" "test-generation" "test-driven-development") ;;
+        typescript|nodejs)
+            skills+=("modularity" "dto" "api-design" "vertical-slice"
+                     "config-validation" "test-generation" "test-driven-development") ;;
+        java)
+            skills+=("modularity" "dto" "api-design" "database-portability"
+                     "migration-management" "config-validation" "test-generation") ;;
+        *)
+            skills+=("modularity" "dto" "config-validation" "test-generation") ;;
+    esac
+
+    for feature in "${features[@]+"${features[@]}"}"; do
+        case "${feature}" in
+            database) skills+=("database-portability" "migration-management") ;;
+            tests)    skills+=("test-generation" "test-driven-development") ;;
+            api)      skills+=("api-design") ;;
+            pipeline) skills+=("pipeline" "failure" "idempotency") ;;
+        esac
+    done
+    skills+=("docs-sync" "dependency-analysis" "conflict-resolution")
+
+    # Deduplicate and emit lines
+    local -A seen
+    for s in "${skills[@]}"; do
+        if [[ -z "${seen[$s]+x}" ]]; then
+            seen[$s]=1
+            if [[ ! -d "${SKELETON_ROOT}/.github/skills/${s}" ]]; then
+                continue  # not in skeleton, skip
+            fi
+            if [[ -f "${target_dir}/.github/skills/${s}/SKILL.md" ]]; then
+                printf '%s|merge|Existing skill detected; skeleton version may add missing sections\n' "${s}"
+            else
+                printf '%s|install|Recommended for %s project\n' "${s}" "${detected_lang:-unknown}"
+            fi
+        fi
+    done
+}
+
+# ── Helper: install a skill fresh from skeleton
+_autoskills_install_skill() {
+    local skill="$1"
+    local target_dir="$2"
+    local src="${SKELETON_ROOT}/.github/skills/${skill}"
+    local dst="${target_dir}/.github/skills/${skill}"
+
+    if [[ ! -d "${src}" ]]; then
+        log_warn "Skill not in skeleton: ${skill} — skipped"
+        return 1
+    fi
+    mkdir -p "${dst}"
+    cp -r "${src}/." "${dst}/"
+    log_ok "Installed: ${BOLD}${skill}${NC}"
+}
+
+# ── Helper: merge an existing skill with skeleton version
+# Backs up existing, installs skeleton version, queues background merge agent
+_autoskills_merge_skill() {
+    local skill="$1"
+    local target_dir="$2"
+    local src="${SKELETON_ROOT}/.github/skills/${skill}"
+    local dst="${target_dir}/.github/skills/${skill}"
+    local bak="${target_dir}/.github/skills/${skill}.bak"
+
+    if [[ ! -d "${src}" ]]; then
+        log_warn "Skill not in skeleton: ${skill} — skipped"
+        return 1
+    fi
+
+    # Backup existing
+    if [[ -d "${dst}" ]]; then
+        rm -rf "${bak}"
+        mkdir -p "${bak}"
+        cp -r "${dst}/." "${bak}/"
+    fi
+
+    # Install skeleton version as base
+    mkdir -p "${dst}"
+    cp -r "${src}/." "${dst}/"
+
+    # Try agent merge (background)
+    if _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
+        local log_dir="${target_dir}/${COPILOT_LOG_DIR}"
+        mkdir -p "${log_dir}"
+        local merge_log="${log_dir}/merge-${skill}-$(date +%Y%m%d-%H%M%S).log"
+        (
+            cd "${target_dir}"
+            copilot \
+                -p "Merge two versions of the '${skill}' skill SKILL.md. ORIGINAL (custom, from previous install): .github/skills/${skill}.bak/SKILL.md. NEW (skeleton-parallel base): .github/skills/${skill}/SKILL.md. MERGE RULES: 1) Use NEW as the base document. 2) For any ## section that exists in ORIGINAL but NOT in NEW, append it at the end of .github/skills/${skill}/SKILL.md. 3) For any ## section that exists in BOTH, keep the NEW version but append any unique bullet points from ORIGINAL under a '### Custom Additions' subsection. 4) After writing the merged SKILL.md, delete .github/skills/${skill}.bak/. 5) Do NOT modify any other files." \
+                --agent="Explore" \
+                --model="${COPILOT_MODEL}" \
+                --no-ask-user \
+                --allow-all-tools \
+                --autopilot \
+                &>"${merge_log}"
+            rm -rf "${target_dir}/.github/skills/${skill}.bak" 2>/dev/null || true
+        ) &
+        log_ok "Merged: ${BOLD}${skill}${NC} ${YELLOW}(background merge agent queued)${NC}"
+    else
+        # No agent — simple structural merge: append unique ## sections from backup
+        if [[ -f "${bak}/SKILL.md" ]] && [[ -f "${dst}/SKILL.md" ]]; then
+            local in_section=false
+            local section_buf=""
+            local current_header=""
+            while IFS= read -r line; do
+                if [[ "${line}" =~ ^##[[:space:]] ]]; then
+                    # Flush previous section if header not in new version
+                    if [[ -n "${current_header}" ]] && ! grep -qF "${current_header}" "${dst}/SKILL.md"; then
+                        printf '\n<!-- Preserved from previous installation -->\n%s\n%s\n' \
+                            "${current_header}" "${section_buf}" >> "${dst}/SKILL.md"
+                    fi
+                    current_header="${line}"
+                    section_buf=""
+                else
+                    [[ -n "${current_header}" ]] && section_buf+="${line}"$'\n'
+                fi
+            done < "${bak}/SKILL.md"
+            # Flush last section
+            if [[ -n "${current_header}" ]] && ! grep -qF "${current_header}" "${dst}/SKILL.md"; then
+                printf '\n<!-- Preserved from previous installation -->\n%s\n%s\n' \
+                    "${current_header}" "${section_buf}" >> "${dst}/SKILL.md"
+            fi
+        fi
+        rm -rf "${bak}" 2>/dev/null || true
+        log_ok "Merged: ${BOLD}${skill}${NC} (custom sections preserved)"
+    fi
+}
+
 cmd_autoskills() {
     local target_dir="."
     local dry_run=false
@@ -1284,41 +1498,34 @@ cmd_autoskills() {
     log_info "Scanning: ${BOLD}${target_dir}${NC}"
     echo ""
 
-    # ── Language detection ────────────────────────────────────────────────
+    # ── Step 1: Language + feature detection ─────────────────────────────
     local detected_lang
     detected_lang="$(_detect_language "${target_dir}")"
     log_step "Detected language: ${detected_lang:-unknown}"
 
-    # ── Feature detection ─────────────────────────────────────────────────
     local features=()
 
-    # SQL / migrations
-    if find "${target_dir}" -maxdepth 4 -name '*.sql' -not -path '*/.*' | grep -q .; then
+    if find "${target_dir}" -maxdepth 4 -name '*.sql' -not -path '*/.*' 2>/dev/null | grep -q .; then
         features+=("database")
     elif [[ -d "${target_dir}/database/migrations" ]] || [[ -d "${target_dir}/migrations" ]]; then
         features+=("database")
     fi
 
-    # Tests
     local test_patterns=('*_test.go' 'test_*.py' '*_test.py' '*_test.ts' '*_test.js' '*_test.rs' '*Test.java')
     for pat in "${test_patterns[@]}"; do
-        if find "${target_dir}" -maxdepth 6 -name "${pat}" -not -path '*/.*' | grep -q .; then
-            features+=("tests")
-            break
+        if find "${target_dir}" -maxdepth 6 -name "${pat}" -not -path '*/.*' 2>/dev/null | grep -q .; then
+            features+=("tests"); break
         fi
     done
 
-    # Docker
     if [[ -f "${target_dir}/Dockerfile" ]] || [[ -f "${target_dir}/docker-compose.yml" ]]; then
         features+=("docker")
     fi
 
-    # API / OpenAPI / gRPC
-    if find "${target_dir}" -maxdepth 3 \( -name 'openapi.yaml' -o -name 'openapi.json' -o -name '*.proto' \) | grep -q .; then
+    if find "${target_dir}" -maxdepth 3 \( -name 'openapi.yaml' -o -name 'openapi.json' -o -name '*.proto' \) 2>/dev/null | grep -q .; then
         features+=("api")
     fi
 
-    # Pipeline / architecture docs present
     if [[ -f "${target_dir}/docs/architecture.md" ]]; then
         features+=("pipeline")
     fi
@@ -1330,128 +1537,149 @@ cmd_autoskills() {
     fi
     echo ""
 
-    # ── Skill mapping ─────────────────────────────────────────────────────
-    # Core skills installed for every project
-    local skills_to_install=("running-prompt" "code-quality" "coding-standards"
-                              "security-audit" "token-optimization" "brainstorming"
-                              "writing-plans" "subagent-driven-development")
+    # ── Step 2: Agent analysis ────────────────────────────────────────────
+    local recommendations_file="${target_dir}/.parallel-dev/autoskills-recommendations.txt"
+    local -a rec_names rec_actions rec_reasons
 
-    # Language-specific skills
-    case "${detected_lang}" in
-        go)
-            skills_to_install+=("modularity" "dto" "determinism" "idempotency"
-                                 "failure" "database-portability" "migration-management"
-                                 "config-validation" "test-generation" "test-driven-development") ;;
-        python)
-            skills_to_install+=("modularity" "dto" "determinism" "idempotency"
-                                 "failure" "database-portability" "migration-management"
-                                 "config-validation" "test-generation" "test-driven-development") ;;
-        typescript|javascript|nodejs)
-            skills_to_install+=("modularity" "dto" "api-design" "vertical-slice"
-                                 "config-validation" "test-generation" "test-driven-development") ;;
-        rust)
-            skills_to_install+=("modularity" "dto" "determinism" "idempotency"
-                                 "failure" "config-validation" "test-generation") ;;
-        java)
-            skills_to_install+=("modularity" "dto" "api-design" "database-portability"
-                                 "migration-management" "config-validation" "test-generation") ;;
-        *)
-            skills_to_install+=("modularity" "dto" "config-validation" "test-generation") ;;
-    esac
-
-    # Feature-specific skills
-    for feature in "${features[@]}"; do
-        case "${feature}" in
-            database) skills_to_install+=("database-portability" "migration-management") ;;
-            tests)    skills_to_install+=("test-generation" "test-driven-development") ;;
-            api)      skills_to_install+=("api-design") ;;
-            pipeline) skills_to_install+=("pipeline" "orchestrator" "failure" "idempotency") ;;
-        esac
-    done
-
-    # Always include quality skills
-    skills_to_install+=("docs-sync" "dependency-analysis" "conflict-resolution")
-
-    # Deduplicate while preserving order
-    local -A seen
-    local unique_skills=()
-    for s in "${skills_to_install[@]}"; do
-        if [[ -z "${seen[$s]+x}" ]]; then
-            seen[$s]=1
-            unique_skills+=("$s")
-        fi
-    done
-    skills_to_install=("${unique_skills[@]}")
-
-    # ── Availability check ────────────────────────────────────────────────
-    local available=() unavailable=()
-    for skill in "${skills_to_install[@]}"; do
-        if [[ -d "${SKELETON_ROOT}/.github/skills/${skill}" ]]; then
-            available+=("${skill}")
-        else
-            unavailable+=("${skill}")
-        fi
-    done
-
-    # ── Show plan ─────────────────────────────────────────────────────────
-    log_step "Skills to install (${#available[@]}):" 
-    for skill in "${available[@]}"; do
-        if [[ -f "${target_dir}/.github/skills/${skill}/SKILL.md" ]]; then
-            echo "    ${skill} ${YELLOW}(already installed)${NC}"
-        else
-            echo "    ${skill}"
-        fi
-    done
-
-    if [[ ${#unavailable[@]} -gt 0 ]]; then
+    if _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
+        log_step "Spawning agent to read and understand the codebase..."
+        log_info "The agent will explore the project and recommend only skills that fit."
         echo ""
-        log_warn "Skipped (not in skeleton): ${unavailable[*]}"
+        local features_str="${features[*]+"${features[*]}"}"
+        _autoskills_agent_analyze "${target_dir}" "${detected_lang}" "${features_str}" "${recommendations_file}" || true
     fi
 
-    if [[ "${dry_run}" == true ]]; then
+    # ── Step 3: Parse agent recommendations ──────────────────────────────
+    if [[ -f "${recommendations_file}" ]]; then
+        log_ok "Agent analysis complete — parsing recommendations..."
+        while IFS='|' read -r name action reason; do
+            # Skip blank lines and comments
+            name="${name// /}"  # trim spaces
+            [[ -z "${name}" || "${name}" =~ ^# ]] && continue
+            action="${action,,}"
+            action="${action// /}"
+            [[ "${action}" != "install" && "${action}" != "merge" ]] && continue
+            # Only include skills that exist in skeleton
+            [[ ! -d "${SKELETON_ROOT}/.github/skills/${name}" ]] && continue
+            rec_names+=("${name}")
+            rec_actions+=("${action}")
+            rec_reasons+=("${reason}")
+        done < "${recommendations_file}"
+    fi
+
+    # ── Step 4: Fallback to static map if no agent output ─────────────────
+    if [[ ${#rec_names[@]} -eq 0 ]]; then
+        if _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
+            log_warn "Agent produced no parseable recommendations — using static detection as fallback"
+        else
+            log_info "Copilot not available — using static skill detection"
+        fi
+        while IFS='|' read -r name action reason; do
+            [[ -z "${name}" ]] && continue
+            rec_names+=("${name}")
+            rec_actions+=("${action}")
+            rec_reasons+=("${reason}")
+        done < <(_autoskills_static_map "${detected_lang}" "${target_dir}" "${features[@]+"${features[@]}"}")
+    fi
+
+    if [[ ${#rec_names[@]} -eq 0 ]]; then
+        log_ok "No skills recommended — project is up to date or no matches found."
         echo ""
+        return 0
+    fi
+
+    # ── Step 5: Show plan with reasons ────────────────────────────────────
+    echo ""
+    log_step "Recommended skills (${#rec_names[@]}):"
+    echo ""
+    for i in "${!rec_names[@]}"; do
+        local action_label
+        case "${rec_actions[$i]}" in
+            install) action_label="${GREEN}[install]${NC}" ;;
+            merge)   action_label="${CYAN}[merge]  ${NC}" ;;
+            *)       action_label="[${rec_actions[$i]}]" ;;
+        esac
+        echo -e "  ${action_label} ${BOLD}${rec_names[$i]}${NC}"
+        echo -e "           ${rec_reasons[$i]}"
+    done
+    echo ""
+    echo -e "  ${GREEN}[install]${NC} = fresh copy from skeleton-parallel"
+    echo -e "  ${CYAN}[merge]  ${NC} = existing skill combined with skeleton version (custom sections preserved)"
+    echo ""
+
+    if [[ "${dry_run}" == true ]]; then
         log_info "Dry run complete. Use without --dry-run to install."
         echo ""
         return 0
     fi
 
-    echo ""
+    # ── Step 6: Confirmation ──────────────────────────────────────────────
     if [[ "${auto_yes}" != true ]]; then
-        printf "%b" "${BOLD}Install ${#available[@]} skills to ${target_dir}/.github/skills/? [y/N] ${NC}"
-        read -r confirm
-        if [[ "${confirm,,}" != "y" ]]; then
-            log_info "Aborted."
-            echo ""
-            return 0
-        fi
+        echo -e "${BOLD}Options:${NC}"
+        echo -e "  ${GREEN}[y]${NC} Install all ${#rec_names[@]} recommended skills"
+        echo -e "  ${YELLOW}[i]${NC} Choose individually (confirm each skill)"
+        echo -e "  ${RED}[n]${NC} Abort"
+        echo ""
+        printf "%b" "${BOLD}Proceed? [y/i/n]: ${NC}"
+        read -r bulk_choice
+        echo ""
+
+        case "${bulk_choice,,}" in
+            y|yes)
+                # keep all
+                ;;
+            i|individual)
+                local sel_names=() sel_actions=() sel_reasons=()
+                for i in "${!rec_names[@]}"; do
+                    local action_short="${rec_actions[$i]}"
+                    printf "%b" "  ${BOLD}${rec_names[$i]}${NC} (${action_short}) — ${rec_reasons[$i]}"$'\n'
+                    printf "%b" "  Install? [y/N]: "
+                    read -r per_choice
+                    if [[ "${per_choice,,}" == "y" ]]; then
+                        sel_names+=("${rec_names[$i]}")
+                        sel_actions+=("${rec_actions[$i]}")
+                        sel_reasons+=("${rec_reasons[$i]}")
+                    fi
+                done
+                if [[ ${#sel_names[@]} -eq 0 ]]; then
+                    log_info "Nothing selected. Aborted."
+                    echo ""
+                    return 0
+                fi
+                rec_names=("${sel_names[@]}")
+                rec_actions=("${sel_actions[@]}")
+                rec_reasons=("${sel_reasons[@]+"${sel_reasons[@]}"}")
+                ;;
+            *)
+                log_info "Aborted."
+                echo ""
+                return 0
+                ;;
+        esac
     fi
 
-    # ── Install ───────────────────────────────────────────────────────────
+    # ── Step 7: Install / merge ───────────────────────────────────────────
     echo ""
     mkdir -p "${target_dir}/.github/skills"
-    local installed=0 skipped=0
-    for skill in "${available[@]}"; do
-        local src="${SKELETON_ROOT}/.github/skills/${skill}"
-        local dst="${target_dir}/.github/skills/${skill}"
-        if [[ -d "${src}" ]]; then
-            cp -r "${src}" "${dst}/"
-            log_ok "Installed: ${skill}"
-            ((installed++))
-        else
-            ((skipped++))
-        fi
+    local installed=0 merged=0 failed=0
+    for i in "${!rec_names[@]}"; do
+        case "${rec_actions[$i]}" in
+            install)
+                _autoskills_install_skill "${rec_names[$i]}" "${target_dir}" && ((installed++)) || ((failed++))
+                ;;
+            merge)
+                _autoskills_merge_skill "${rec_names[$i]}" "${target_dir}" && ((merged++)) || ((failed++))
+                ;;
+        esac
     done
 
     echo ""
-    log_ok "Done. ${installed} skill(s) installed, ${skipped} skipped."
-    echo ""
-
-    # Background agent validates auto-installed skills
-    if [[ ${installed} -gt 0 ]]; then
-        _spawn_copilot_agent_bg "${target_dir}" "doctor" \
-            "Validate auto-installed skills for this ${detected_lang:-unknown} project: 1) All installed skills have valid SKILL.md format. 2) Skills match the project's detected technology stack. 3) Skills are properly wired in agent files. 4) No conflicting or duplicate skills. 5) Recommend additional skills if needed. Report findings in .parallel-dev/agent-logs/." \
-            "autoskills-validation"
+    log_ok "Done. ${BOLD}${installed}${NC} installed, ${BOLD}${merged}${NC} merged, ${BOLD}${failed}${NC} failed."
+    if [[ ${merged} -gt 0 ]] && _check_copilot_available && [[ "${SKIP_AGENT:-false}" != "true" ]]; then
+        log_info "Merge agents are running in the background."
+        log_info "Check .parallel-dev/agent-logs/ for merge results."
     fi
+    echo ""
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
