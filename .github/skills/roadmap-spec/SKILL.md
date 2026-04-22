@@ -17,7 +17,7 @@ order. Missing sections block implementation. Incomplete sections block review.
 
 This skill is **language-agnostic**. All file path placeholders, function
 signatures, and test commands are expressed in generic form with a
-[Language Reference Table](#language-reference-table) for substitution.
+**Language Reference Table** (see section below) for substitution.
 
 ---
 
@@ -191,7 +191,7 @@ by the orchestrator after this phase completes).
 Exact file tree for every file this phase creates or modifies.
 Use `(create)` or `(modify)` annotations.
 Substitute `{module-dir}`, `{module-entry}`, `{contracts}`, and `{test-file}`
-from the [Language Reference Table](#language-reference-table).
+from the **Language Reference Table** (above).
 
 **Template (language-agnostic — substitute paths from table):**
 
@@ -589,7 +589,7 @@ validate these criteria before the phase is merged.
 ## Complete Phase Template
 
 Copy this block when writing a new phase spec. Substitute `{…}` with values
-from the [Language Reference Table](#language-reference-table).
+from the **Language Reference Table** (above).
 
 > **phases.yaml:** After writing this spec, add the corresponding entry to
 > `config/phases.yaml` with matching `name`, `complexity`, `group`, and `skills`.
@@ -721,7 +721,7 @@ phases:
 - [ ] All 11 sections present, none omitted
 - [ ] No `TBD` or `TODO` placeholders remain
 - [ ] BLOCKERS are resolved or tracked as open issues
-- [ ] Language column chosen from [Language Reference Table](#language-reference-table) and applied consistently
+- [ ] Language column chosen from the **Language Reference Table** (above) and applied consistently
 - [ ] DTO Flow table has no empty rows
 - [ ] Adapter Calls table names exact method signatures
 - [ ] Exit Criteria items are all binary (pass/fail verifiable)
