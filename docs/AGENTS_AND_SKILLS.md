@@ -114,6 +114,8 @@ phase-builder → dto-guardian → integration → refactor (conditional)
 | subagent-driven-development | `.github/skills/subagent-driven-development/SKILL.md` | Fresh subagent per task + 2-stage review    |
 | test-driven-development     | `.github/skills/test-driven-development/SKILL.md`     | RED-GREEN-REFACTOR cycle enforcement        |
 | rtk                         | `.github/skills/rtk/SKILL.md`                         | Token-efficient CLI proxy (60-90% savings)  |
+| roadmap-spec                | `.github/skills/roadmap-spec/SKILL.md`                | Execution-grade phase spec (11 sections)    |
+| parallel-dev                | `.github/skills/parallel-dev/SKILL.md`                | PARALLEL_DEV.md operator guide (10 sections) |
 
 ### Skill Structure
 

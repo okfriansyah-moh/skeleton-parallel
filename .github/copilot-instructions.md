@@ -268,7 +268,9 @@ Skills are pre-digested knowledge packages that agents load on-demand. They live
 ├── writing-plans/SKILL.md           # Break work into bite-sized implementation tasks
 ├── subagent-driven-development/SKILL.md # Fresh subagent per task + 2-stage review
 ├── test-driven-development/SKILL.md # RED-GREEN-REFACTOR cycle enforcement
-└── rtk/SKILL.md                     # Token-efficient CLI proxy (60-90% savings)
+├── rtk/SKILL.md                     # Token-efficient CLI proxy (60-90% savings)
+├── roadmap-spec/SKILL.md            # Execution-grade phase spec standard (11 mandatory sections)
+└── parallel-dev/SKILL.md            # PARALLEL_DEV.md operator guide standard (10 mandatory sections)
 ```
 
 ### Skill Loading Rules
