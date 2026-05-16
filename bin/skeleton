@@ -2068,10 +2068,18 @@ cmd_autoskills() {
     for i in "${!rec_names[@]}"; do
         case "${rec_actions[$i]}" in
             install)
-                _autoskills_install_skill "${rec_names[$i]}" "${target_dir}" && ((installed++)) || ((failed++))
+                if _autoskills_install_skill "${rec_names[$i]}" "${target_dir}"; then
+                    ((++installed))
+                else
+                    ((++failed))
+                fi
                 ;;
             merge)
-                _autoskills_merge_skill "${rec_names[$i]}" "${target_dir}" && ((merged++)) || ((failed++))
+                if _autoskills_merge_skill "${rec_names[$i]}" "${target_dir}"; then
+                    ((++merged))
+                else
+                    ((++failed))
+                fi
                 ;;
         esac
     done
@@ -2083,7 +2091,7 @@ cmd_autoskills() {
         _autoskills_agent_generate_domain "${target_dir}" "${detected_lang}" "${features_str}" "${domain_manifest}" || true
         # Count how many were actually created
         for name in "${domain_names[@]}"; do
-            [[ -f "${target_dir}/.github/skills/${name}/SKILL.md" ]] && ((generated++))
+            [[ -f "${target_dir}/.github/skills/${name}/SKILL.md" ]] && ((++generated)) || true
         done
     elif [[ ${#domain_names[@]} -gt 0 ]]; then
         log_warn "Copilot not available — domain skills not generated."
