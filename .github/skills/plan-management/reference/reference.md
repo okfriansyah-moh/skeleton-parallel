@@ -6,10 +6,10 @@ This reference documents the canonical PLAN.md format for the `a2a-brainstorm` p
 
 ## External References
 
-| Source                        | URL / Path                                                                             | Purpose                                             |
-| ----------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Source blueprint              | `docs/A2A-agent-Brainstorm.md`                                                         | Canonical system design spec for this project       |
-| Spec-Driven Development (SDD) | https://jurnal.atlassian.net/wiki/spaces/DFS/pages/50632556624/Spec-Driven+Development | Mekari engineering process governing task breakdown |
+| Source                        | URL / Path                                                                             | Purpose                                       |
+| ----------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Source blueprint              | `docs/A2A-agent-Brainstorm.md`                                                         | Canonical system design spec for this project |
+| Spec-Driven Development (SDD) | https://jurnal.atlassian.net/wiki/spaces/DFS/pages/50632556624/Spec-Driven+Development | engineering process governing task breakdown  |
 
 ---
 

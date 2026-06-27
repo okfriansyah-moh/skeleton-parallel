@@ -1,0 +1,14 @@
+{
+  "1": {
+    "key": "1",
+    "stage": "task_runner",
+    "status": "completed",
+    "updated_at": "2026-06-27T04:18:03Z"
+  },
+  "task_99": {
+    "key": "task_99",
+    "stage": "rollback",
+    "status": "failed",
+    "updated_at": "2026-06-27T06:05:00Z"
+  }
+}

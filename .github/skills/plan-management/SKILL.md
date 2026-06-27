@@ -1,6 +1,6 @@
 ---
 name: plan-management
-description: "Generate or update a PLAN.md implementation plan for the a2a-brainstorm project. Use for: creating a new plan from scratch from any context (spec, blueprint, Confluence link, problem statement, attachment); adding new tasks to an existing PLAN.md; reviewing a plan for completeness. Produces self-contained task breakdowns that each fit in one chat session, following the Mekari Spec-Driven Development format tailored for Go 1.26 + SvelteKit + A2A."
+description: "Generate or update a PLAN.md implementation plan for the a2a-brainstorm project. Use for: creating a new plan from scratch from any context (spec, blueprint, Confluence link, problem statement, attachment); adding new tasks to an existing PLAN.md; reviewing a plan for completeness. Produces self-contained task breakdowns that each fit in one chat session, following the Spec-Driven Development format tailored for Go 1.26 + SvelteKit + A2A."
 argument-hint: "create | update | review"
 ---
 

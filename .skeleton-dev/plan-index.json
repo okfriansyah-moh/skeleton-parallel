@@ -1,0 +1,913 @@
+{
+  "plan_path": "docs/PLAN.md",
+  "generated_at": "2026-06-27T07:55:59Z",
+  "tasks": {
+    "1": {
+      "line_start": 228,
+      "line_end": 259,
+      "name": "Repository Scaffold + `lib/` Extraction",
+      "goal": "Create the new directory skeleton and extract cross-cutting utilities from `run_parallel.sh` into focused `scripts/lib/` modules that every pipeline script will source.",
+      "files": [
+        "scripts/lib/common.sh",
+        "scripts/lib/checkpoint.sh",
+        "checkpoint_create",
+        "checkpoint_rollback",
+        "scripts/lib/policy.sh",
+        "docs/PLAN.md"
+      ],
+      "depends_on": [],
+      "complexity": "Low",
+      "status": "completed",
+      "validation": [
+        "`bash -n scripts/lib/common.sh`: zero syntax errors",
+        "`bash -n scripts/lib/checkpoint.sh`: zero syntax errors",
+        "`bash -n scripts/lib/policy.sh`: zero syntax errors",
+        "`source scripts/lib/common.sh && log_info \"test\"`: outputs `[INFO] test`",
+        "All `.gitkeep` directories present: `find . -name .gitkeep | wc -l` ≥ 14"
+      ],
+      "validation_line": 246
+    },
+    "2": {
+      "line_start": 260,
+      "line_end": 289,
+      "name": "Pipeline Script Extraction",
+      "goal": "Decompose the monolithic `run_parallel.sh` into focused pipeline modules under `scripts/pipeline/` and `scripts/lib/`, keeping all existing behavior intact.",
+      "files": [
+        "scripts/lib/agent.sh",
+        "scripts/lib/hooks.sh",
+        "scripts/pipeline/integration.sh",
+        "scripts/pipeline/global_validation.sh",
+        "scripts/pipeline/pr.sh",
+        "integration.pr_mode"
+      ],
+      "depends_on": [
+        1
+      ],
+      "complexity": "Medium",
+      "status": "pending",
+      "validation": [
+        "`bash -n scripts/lib/agent.sh`: zero syntax errors",
+        "`bash -n scripts/pipeline/integration.sh`: zero syntax errors",
+        "`bash -n scripts/pipeline/global_validation.sh`: zero syntax errors",
+        "`bash -n scripts/pipeline/pr.sh`: zero syntax errors",
+        "Source all lib files from a test script without error: `source scripts/lib/common.sh && source scripts/lib/agent.sh && echo OK`"
+      ],
+      "validation_line": 278
+    },
+    "3": {
+      "line_start": 290,
+      "line_end": 328,
+      "name": "bin/skeleton` Subcommand Dispatcher Refactor",
+      "goal": "Refactor `bin/skeleton` from a monolith into a thin dispatcher that delegates each subcommand to its dedicated script, and add all new v1.0 subcommands as stubs.",
+      "files": [
+        "bin/skeleton",
+        "--dir PATH",
+        "--no-interactive",
+        "scripts/run_parallel.sh"
+      ],
+      "depends_on": [
+        1
+      ],
+      "complexity": "Medium",
+      "status": "pending",
+      "validation": [
+        "`bash -n bin/skeleton`: zero syntax errors",
+        "`./bin/skeleton --help`: prints usage with all new subcommands listed",
+        "`./bin/skeleton version`: prints version string",
+        "`./scripts/run_parallel.sh start --mode=1 1 2` (dry path): prints deprecation warning and shows translated `skeleton run --parallel 1 2` command"
+      ],
+      "validation_line": 318
+    },
+    "4": {
+      "line_start": 329,
+      "line_end": 354,
+      "name": "Configuration Split: `.ai/manifest.yaml` + `config/skeleton.yaml",
+      "goal": "Implement the canonical identity/runtime config split, with a loader/validator that enforces the rules and a template for new projects.",
+      "files": [
+        "config/skeleton.yaml.template",
+        "templates/ai/manifest.yaml.template",
+        "scripts/lib/config.sh"
+      ],
+      "depends_on": [
+        1
+      ],
+      "complexity": "Medium",
+      "status": "pending",
+      "validation": [
+        "`bash -n scripts/lib/config.sh`: zero syntax errors",
+        "Valid config loads without error: `source scripts/lib/config.sh && load_config . && echo \"$SKELETON_DRIVER\"`",
+        "Invalid driver `cli_subscription` + `cursor` → exits non-zero with message containing `doctor`",
+        "Missing `execution.driver` key → exits non-zero with descriptive message"
+      ],
+      "validation_line": 344
+    },
+    "5": {
+      "line_start": 355,
+      "line_end": 387,
+      "name": "PLAN.md Parser",
+      "goal": "Build the Python PLAN.md parser that produces a `.skeleton-dev/plan-index.json` file consumed by all shell orchestration scripts, with O(1) section loading for large files.",
+      "files": [
+        "scripts/plan/plan_parser.py",
+        "index_tasks(plan_path)",
+        "parse_dep_graph(tasks)",
+        "extract_file_ownership(task)",
+        "check_parallel_safety(task_a, task_b)",
+        "is_completed(task)",
+        "mark_completed(plan_path, task_n)",
+        "scripts/plan/plan_validate.py"
+      ],
+      "depends_on": [
+        1
+      ],
+      "complexity": "High",
+      "status": "pending",
+      "validation": [
+        "`python3 -m py_compile scripts/plan/plan_parser.py`: zero errors",
+        "`python3 -m py_compile scripts/plan/plan_validate.py`: zero errors",
+        "`python3 scripts/plan/plan_parser.py docs/PLAN.md --export .skeleton-dev/plan-index.json`: produces valid JSON with all 17 tasks indexed",
+        "`python3 scripts/plan/plan_validate.py .skeleton-dev/plan-index.json`: exits 0 on valid plan",
+        "Large-file test: parser handles 100k-line file without loading it whole (verify via `resource.getrusage`)"
+      ],
+      "validation_line": 376
+    },
+    "6": {
+      "line_start": 388,
+      "line_end": 415,
+      "name": ".skeleton-dev/` State + Observability",
+      "goal": "Implement all state management and observability primitives that every pipeline stage reads and writes.",
+      "files": [
+        "scripts/lib/state.sh",
+        "state_init(project_root)",
+        "run_status_write(task_n, stage, status)",
+        "run_status_read(key)",
+        "events_append(type, payload_json)",
+        "compose_stamp_write(ai_dir)",
+        "compose_stamp_valid(ai_dir)",
+        "bin/skeleton status",
+        "bin/skeleton cleanup"
+      ],
+      "depends_on": [
+        3,
+        4,
+        5
+      ],
+      "complexity": "Medium",
+      "status": "pending",
+      "validation": [
+        "`bash -n scripts/lib/state.sh`: zero syntax errors",
+        "`source scripts/lib/state.sh && state_init . && ls .skeleton-dev/`: directory exists",
+        "`run_status_write 1 task_runner completed` → `.skeleton-dev/run-status.json` contains task 1 row",
+        "`events_append task_start '{\"task\":1}'` → `.skeleton-dev/events.jsonl` contains valid JSONL line",
+        "`skeleton status` on initialized state: prints readable table; exits 0"
+      ],
+      "validation_line": 404
+    },
+    "7": {
+      "line_start": 416,
+      "line_end": 455,
+      "name": "Knowledge Plane: Stage −1 (ARES Integration)",
+      "goal": "Implement the full Stage −1 knowledge sync algorithm — import combination policy, compose-if-stale, and legacy fallback — that runs automatically before every `skeleton run`.",
+      "files": [
+        "scripts/knowledge/detect_legacy.py",
+        ".github/copilot-instructions.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".cursor/rules/",
+        ".antigravity/",
+        "scripts/knowledge/import.sh",
+        "scripts/knowledge/compose.sh",
+        "scripts/knowledge/sync.sh"
+      ],
+      "depends_on": [
+        4,
+        6
+      ],
+      "complexity": "High",
+      "status": "pending",
+      "validation": [
+        "`bash -n scripts/knowledge/sync.sh`: zero syntax errors",
+        "`python3 -m py_compile scripts/knowledge/detect_legacy.py`: zero errors",
+        "`python3 scripts/knowledge/detect_legacy.py .` on this repo: detects `github` source (`.github/` exists)",
+        "`bash scripts/knowledge/sync.sh --dry-run`: prints planned steps without writing",
+        "`ars` not installed: `sync.sh` exits with message `ars CLI not found — run skeleton integrate`"
+      ],
+      "validation_line": 444
+    },
+    "8": {
+      "line_start": 456,
+      "line_end": 485,
+      "name": "Router Wrapper (skeleton-wrapped 9router)",
+      "goal": "Implement the 9router daemon management layer so `skeleton` can install, start, stop, and health-check 9router, and inject env vars into CLI drivers when `router.inject: true`.",
+      "files": [
+        "router/9router-pin.json",
+        "router/wrap.sh",
+        "router_install",
+        "router_start",
+        "router_stop",
+        "router_health",
+        "scripts/lib/router.sh",
+        "router_check_required()",
+        "router_auto_start_if_needed()",
+        "inject_cli_env(copilot|claude|codex)",
+        "router/oauth-guide.md"
+      ],
+      "depends_on": [
+        3,
+        4
+      ],
+      "complexity": "Medium",
+      "status": "pending",
+      "validation": [
+        "`bash -n router/wrap.sh`: zero syntax errors",
+        "`bash -n scripts/lib/router.sh`: zero syntax errors",
+        "`skeleton router status`: prints running/stopped state (even if daemon not installed)",
+        "`skeleton router check`: exits 0 if daemon up, 1 if down — no crash on missing daemon",
+        "`router.enabled: false` in config + `driver: cli_subscription` → `router_check_required` returns `none`"
+      ],
+      "validation_line": 474
+    },
+    "9": {
+      "line_start": 486,
+      "line_end": 518,
+      "name": "Execution Driver: `router_http` (Model 1)",
+      "goal": "Implement the HTTP harness driver that assembles prompts and calls 9router's OpenAI-compatible `/v1/chat/completions` endpoint, including quota/429 handling and streaming log output.",
+      "files": [
+        "drivers/router_http/run.sh",
+        "drivers/registry.yaml"
+      ],
+      "depends_on": [
+        4,
+        8
+      ],
+      "complexity": "High",
+      "status": "pending",
+      "validation": [
+        "`bash -n drivers/router_http/run.sh`: zero syntax errors",
+        "Prompt assembly unit test: mock `TASK_PROMPT.md` + skills dir → verify system prompt contains all four components",
+        "Exit code 2 on 429: `curl` mock returning HTTP 429 → driver exits 2",
+        "`drivers/registry.yaml`: valid YAML; all five entries reference existing paths (`.gitkeep` acceptable for unimplemented drivers)"
+      ],
+      "validation_line": 508
+    },
+    "10": {
+      "line_start": 519,
+      "line_end": 558,
+      "name": "Execution Driver: `cli_subscription` (copilot / claude / codex)",
+      "goal": "Implement the three vendor CLI driver adapters for the `cli_subscription` execution model, each running non-interactively with optional 9router env injection.",
+      "files": [
+        "drivers/cli/copilot.sh",
+        "drivers/cli/claude.sh",
+        "drivers/cli/codex.sh"
+      ],
+      "depends_on": [
+        4,
+        8
+      ],
+      "complexity": "Medium",
+      "status": "pending",
+      "validation": [
+        "`bash -n drivers/cli/copilot.sh`: zero syntax errors",
+        "`bash -n drivers/cli/claude.sh`: zero syntax errors",
+        "`bash -n drivers/cli/codex.sh`: zero syntax errors",
+        "`copilot` not on PATH → driver exits with message containing `brew install` or install URL",
+        "Config guard: `cli.provider: cursor` → `load_config` exits non-zero with fix hint",
+        "All three drivers use identical exit code convention (0/1/2/3)"
+      ],
+      "validation_line": 546
+    },
+    "11": {
+      "line_start": 559,
+      "line_end": 600,
+      "name": "Execution Driver: `sdk_cursor` (Model 2 — Cursor)",
+      "goal": "Implement the Node.js Cursor SDK driver wrapper that invokes `@cursor/sdk` Agent for local runtime, with rate-limit error classification and streaming log output.",
+      "files": [
+        "drivers/cursor-sdk/package.json",
+        "drivers/cursor-sdk/run.mjs",
+        "CURSOR_API_KEY",
+        "PROJECT_ROOT"
+      ],
+      "depends_on": [
+        4
+      ],
+      "complexity": "Medium",
+      "status": "pending",
+      "validation": [
+        "`node --check drivers/cursor-sdk/run.mjs`: zero syntax errors",
+        "`CURSOR_API_KEY` absent → driver exits 1 with message `CURSOR_API_KEY not set`",
+        "Node.js < 22.13 + `driver: sdk_cursor` → `load_config` exits non-zero with version hint",
+        "Rate-limit mock (inject string `\"rate_limit\"` to stderr) → driver exits 2",
+        "`cd drivers/cursor-sdk && npm install`: installs without error (requires Node.js ≥ 22.13)"
+      ],
+      "validation_line": 589
+    },
+    "12": {
+      "line_start": 601,
+      "line_end": 635,
+      "name": "Stage 0: Per-Task Executor + Agentic Loop L2",
+      "goal": "Implement the per-task execution loop (L2) that wraps the 7-step agent chain, generates `TASK_PROMPT.md` from the plan index, manages git checkpoints, and writes PLAN completion markers.",
+      "files": [
+        "scripts/pipeline/task_executor.sh",
+        "execute_task(task_n, driver, plan_index, work_dir)",
+        "generate_task_prompt(task_n, plan_index)",
+        "scripts/pipeline/modes.sh",
+        "schedule_hybrid(tasks, plan_index)",
+        "schedule_parallel(tasks)",
+        "schedule_sequential(tasks)"
+      ],
+      "depends_on": [
+        2,
+        5,
+        6,
+        9,
+        10,
+        11
+      ],
+      "complexity": "High",
+      "status": "completed",
+      "validation": [
+        "`bash -n scripts/pipeline/task_executor.sh`: zero syntax errors",
+        "`bash -n scripts/pipeline/modes.sh`: zero syntax errors",
+        "`generate_task_prompt 1 .skeleton-dev/plan-index.json` → creates `.skeleton-dev/TASK_PROMPT.md` containing task 1 content",
+        "Checkpoint tag created before agent chain: `git tag | grep checkpoint-task-1-pre`",
+        "Completion marker written on success: `grep '<!-- ✅ Task 1 completed -->' docs/PLAN.md`",
+        "Retry exceed → rollback: mock agent returning exit 1 five times → `git log` shows reset to checkpoint"
+      ],
+      "validation_line": 623
+    },
+    "13": {
+      "line_start": 636,
+      "line_end": 668,
+      "name": "skeleton run` Main Orchestrator",
+      "goal": "Implement `scripts/skeleton-run.sh` — the full pipeline orchestrator that wires Stage −1 through Stage [6] together, with task selection, dependency validation, and scheduling mode dispatch.",
+      "files": [
+        "scripts/skeleton-run.sh",
+        "--dry-run"
+      ],
+      "depends_on": [
+        7,
+        8,
+        12
+      ],
+      "complexity": "High",
+      "status": "completed",
+      "validation": [
+        "`bash -n scripts/skeleton-run.sh`: zero syntax errors",
+        "`skeleton run --dry-run`: prints stage execution plan for all pending tasks; exits 0; no git changes",
+        "`skeleton run 1 2` with task 2 depending on task 1 (incomplete) + `--strict-deps` → exits non-zero before any agent runs",
+        "`skeleton run 1 2 --force-deps` → logs warning containing `force-deps`; proceeds",
+        "`skeleton run --plan docs/PLAN.md 1 --no-auto-merge` → Stage 0 completes; Stage [2] skipped; pipeline stops"
+      ],
+      "validation_line": 657
+    },
+    "14": {
+      "line_start": 669,
+      "line_end": 707,
+      "name": "Lifecycle Commands: `init`, `integrate`, `doctor`, `autoskills",
+      "goal": "Implement the four core lifecycle commands that scaffold and validate projects, including the brownfield `skeleton integrate` flow (Appendix A checklist) and the `skeleton autoskills` stack-detection agent.",
+      "files": [
+        "bin/skeleton init",
+        "skeleton init <lang> --name=<name> [--dir=DIR]",
+        "bin/skeleton integrate",
+        "bin/skeleton doctor",
+        "bin/skeleton autoskills",
+        "templates/docs/PLAN.md.stub"
+      ],
+      "depends_on": [
+        4,
+        7,
+        8
+      ],
+      "complexity": "High",
+      "status": "completed",
+      "validation": [
+        "`skeleton init go --name=test-svc --dir=/tmp/test-svc`: creates valid project structure with `.ai/manifest.yaml`, `config/skeleton.yaml`, `docs/PLAN.md`",
+        "`skeleton doctor` on fresh `init` output: all checks pass; exits 0",
+        "`skeleton integrate` on this repo (has `.github/copilot-instructions.md`): writes `.ai/manifest.yaml`; `skeleton doctor` passes after",
+        "`skeleton autoskills` on Go repo: writes at least one skill under `.ai/skills/`"
+      ],
+      "validation_line": 697
+    },
+    "15": {
+      "line_start": 708,
+      "line_end": 736,
+      "name": "Hook Templates + T1/T3 Testing Infrastructure <!-- ✅ Task 15 completed -->",
+      "goal": "Create quality-gate and acceptance hook templates for all four supported stacks, implement `skeleton hooks regenerate`, and wire T1 (per-task) and T3 (post-integration) hook calls into the pipeline.",
+      "files": [
+        "templates/hooks/go/quality-gates.sh",
+        "templates/hooks/python/quality-gates.sh",
+        "templates/hooks/typescript/quality-gates.sh",
+        "templates/hooks/fullstack/quality-gates.sh",
+        "templates/hooks/{go,python,typescript,fullstack}/acceptance-gates.sh",
+        "bin/skeleton hooks regenerate",
+        "detect_stack(project_root)"
+      ],
+      "depends_on": [
+        2,
+        12
+      ],
+      "complexity": "Medium",
+      "status": "completed",
+      "validation": [
+        "`bash -n templates/hooks/go/quality-gates.sh`: zero syntax errors",
+        "`bash -n templates/hooks/python/quality-gates.sh`: zero syntax errors",
+        "`bash -n templates/hooks/typescript/quality-gates.sh`: zero syntax errors",
+        "`skeleton hooks regenerate` on this repo (has `.github/`): detects stack; writes `scripts/hooks/quality-gates.sh`; exits 0",
+        "T1 hook path: `task_executor.sh` calls `scripts/hooks/quality-gates.sh` after each task (mock hook exits 1 → task marked failed)"
+      ],
+      "validation_line": 725
+    },
+    "16": {
+      "line_start": 737,
+      "line_end": 768,
+      "name": "Acceptance Pipeline: `acceptance.sh` + Feedback Router (5b/5c) + Docs Sync [4] <!-- ✅ Task 16 completed -->",
+      "goal": "Implement Stage [5b] acceptance, Stage [5c] test-sufficiency, Stage [4] docs-sync, and the feedback router that re-routes failures back to the appropriate earlier stage.",
+      "files": [
+        "scripts/pipeline/acceptance.sh",
+        "run_5b(project_root)",
+        "run_5c(project_root)",
+        "feedback_router(failure_class, task_n)",
+        "lint_build_unit",
+        "wrong_behavior",
+        "missing_tests",
+        "wrong_feature",
+        "acceptance.max_retries",
+        "--skip-acceptance",
+        "--acceptance-only",
+        "scripts/pipeline/integration.sh"
+      ],
+      "depends_on": [
+        13,
+        15
+      ],
+      "complexity": "High",
+      "status": "completed",
+      "validation": [
+        "`bash -n scripts/pipeline/acceptance.sh`: zero syntax errors",
+        "`acceptance.skip: true` → `run_5b` exits 0 immediately without calling hook",
+        "Feedback router: `failure_class=missing_tests` → routes to `test-builder`; `failure_class=wrong_feature` with `task_n=3` → routes back to `execute_task 3`",
+        "`acceptance.max_retries` exceeded → `run-status.json` shows `global-validation-5b: FAILED`; no `gh pr create` called",
+        "`run_docs_sync` with absent `docs/PROGRESS_REPORT.md` → skips silently (no error)"
+      ],
+      "validation_line": 757
+    },
+    "17": {
+      "line_start": 769,
+      "line_end": 1268,
+      "name": "Migration Shim + Final Integration Test + Documentation <!-- ✅ Task 17 completed -->",
+      "goal": "Complete the `phases.yaml` → PLAN.md migration adapter, validate the full end-to-end pipeline, and update all project documentation to reflect the v1.0 architecture.",
+      "files": [
+        "config/phases.yaml",
+        "scripts/run_parallel.sh",
+        "README.md",
+        "docs/PARALLEL_DEV.md",
+        "skeleton run --dry-run",
+        "skeleton run 1",
+        "skeleton run --force-deps 2",
+        "skeleton doctor"
+      ],
+      "depends_on": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "complexity": "Medium",
+      "status": "completed",
+      "validation": [
+        "`skeleton run` executes PLAN tasks with full/partial selection",
+        "Hybrid mode is default; `--parallel` and `--sequential` flags work",
+        "Stage 0 agent pipeline (7 steps, task-named) runs correctly",
+        "Stages [2]–[6] preserved from existing `run_parallel.sh` behavior",
+        "T1 runs after each task; T3 runs at 5a",
+        "Stage −1 compose-if-stale (not full import on every run)",
+        "`.ai/manifest.yaml` identity + `config/skeleton.yaml` runtime split enforced",
+        "`skeleton router install/start/check/oauth` all functional",
+        "`router_http` driver assembles prompt + calls 9router + classifies 429",
+        "`cli_subscription` driver: copilot adapter functional; claude/codex stubs with correct flags",
+        "`sdk_cursor` driver: local runtime functional with `CURSOR_API_KEY`",
+        "`skeleton integrate` runs full Appendix A checklist",
+        "`scripts/run_parallel.sh` deprecation shim passes all calls to `skeleton run`",
+        "`docs/PROGRESS_REPORT.md` updated in Stage [4] when present",
+        "`bash -n` passes on all shell scripts",
+        "`python3 -m py_compile` passes on all Python files",
+        "`node --check` passes on all `.mjs` files",
+        "`tests/integration/test_skeleton_run.sh` exits 0"
+      ],
+      "validation_line": 788
+    }
+  },
+  "dep_graph": {
+    "1": [],
+    "2": [
+      1
+    ],
+    "3": [
+      1
+    ],
+    "4": [
+      1
+    ],
+    "5": [
+      1
+    ],
+    "6": [
+      3,
+      4,
+      5
+    ],
+    "7": [
+      4,
+      6
+    ],
+    "8": [
+      3,
+      4
+    ],
+    "9": [
+      4,
+      8
+    ],
+    "10": [
+      4,
+      8
+    ],
+    "11": [
+      4
+    ],
+    "12": [
+      2,
+      5,
+      6,
+      9,
+      10,
+      11
+    ],
+    "13": [
+      7,
+      8,
+      12
+    ],
+    "14": [
+      4,
+      7,
+      8
+    ],
+    "15": [
+      2,
+      12
+    ],
+    "16": [
+      13,
+      15
+    ],
+    "17": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ]
+  },
+  "file_ownership": {
+    "scripts/lib/common.sh": [
+      1
+    ],
+    "scripts/lib/checkpoint.sh": [
+      1
+    ],
+    "checkpoint_create": [
+      1
+    ],
+    "checkpoint_rollback": [
+      1
+    ],
+    "scripts/lib/policy.sh": [
+      1
+    ],
+    "docs/PLAN.md": [
+      1
+    ],
+    "scripts/lib/agent.sh": [
+      2
+    ],
+    "scripts/lib/hooks.sh": [
+      2
+    ],
+    "scripts/pipeline/integration.sh": [
+      2,
+      16
+    ],
+    "scripts/pipeline/global_validation.sh": [
+      2
+    ],
+    "scripts/pipeline/pr.sh": [
+      2
+    ],
+    "integration.pr_mode": [
+      2
+    ],
+    "bin/skeleton": [
+      3
+    ],
+    "--dir PATH": [
+      3
+    ],
+    "--no-interactive": [
+      3
+    ],
+    "scripts/run_parallel.sh": [
+      3,
+      17
+    ],
+    "config/skeleton.yaml.template": [
+      4
+    ],
+    "templates/ai/manifest.yaml.template": [
+      4
+    ],
+    "scripts/lib/config.sh": [
+      4
+    ],
+    "scripts/plan/plan_parser.py": [
+      5
+    ],
+    "index_tasks(plan_path)": [
+      5
+    ],
+    "parse_dep_graph(tasks)": [
+      5
+    ],
+    "extract_file_ownership(task)": [
+      5
+    ],
+    "check_parallel_safety(task_a, task_b)": [
+      5
+    ],
+    "is_completed(task)": [
+      5
+    ],
+    "mark_completed(plan_path, task_n)": [
+      5
+    ],
+    "scripts/plan/plan_validate.py": [
+      5
+    ],
+    "scripts/lib/state.sh": [
+      6
+    ],
+    "state_init(project_root)": [
+      6
+    ],
+    "run_status_write(task_n, stage, status)": [
+      6
+    ],
+    "run_status_read(key)": [
+      6
+    ],
+    "events_append(type, payload_json)": [
+      6
+    ],
+    "compose_stamp_write(ai_dir)": [
+      6
+    ],
+    "compose_stamp_valid(ai_dir)": [
+      6
+    ],
+    "bin/skeleton status": [
+      6
+    ],
+    "bin/skeleton cleanup": [
+      6
+    ],
+    "scripts/knowledge/detect_legacy.py": [
+      7
+    ],
+    ".github/copilot-instructions.md": [
+      7
+    ],
+    "CLAUDE.md": [
+      7
+    ],
+    "AGENTS.md": [
+      7
+    ],
+    ".cursor/rules/": [
+      7
+    ],
+    ".antigravity/": [
+      7
+    ],
+    "scripts/knowledge/import.sh": [
+      7
+    ],
+    "scripts/knowledge/compose.sh": [
+      7
+    ],
+    "scripts/knowledge/sync.sh": [
+      7
+    ],
+    "router/9router-pin.json": [
+      8
+    ],
+    "router/wrap.sh": [
+      8
+    ],
+    "router_install": [
+      8
+    ],
+    "router_start": [
+      8
+    ],
+    "router_stop": [
+      8
+    ],
+    "router_health": [
+      8
+    ],
+    "scripts/lib/router.sh": [
+      8
+    ],
+    "router_check_required()": [
+      8
+    ],
+    "router_auto_start_if_needed()": [
+      8
+    ],
+    "inject_cli_env(copilot|claude|codex)": [
+      8
+    ],
+    "router/oauth-guide.md": [
+      8
+    ],
+    "drivers/router_http/run.sh": [
+      9
+    ],
+    "drivers/registry.yaml": [
+      9
+    ],
+    "drivers/cli/copilot.sh": [
+      10
+    ],
+    "drivers/cli/claude.sh": [
+      10
+    ],
+    "drivers/cli/codex.sh": [
+      10
+    ],
+    "drivers/cursor-sdk/package.json": [
+      11
+    ],
+    "drivers/cursor-sdk/run.mjs": [
+      11
+    ],
+    "CURSOR_API_KEY": [
+      11
+    ],
+    "PROJECT_ROOT": [
+      11
+    ],
+    "scripts/pipeline/task_executor.sh": [
+      12
+    ],
+    "execute_task(task_n, driver, plan_index, work_dir)": [
+      12
+    ],
+    "generate_task_prompt(task_n, plan_index)": [
+      12
+    ],
+    "scripts/pipeline/modes.sh": [
+      12
+    ],
+    "schedule_hybrid(tasks, plan_index)": [
+      12
+    ],
+    "schedule_parallel(tasks)": [
+      12
+    ],
+    "schedule_sequential(tasks)": [
+      12
+    ],
+    "scripts/skeleton-run.sh": [
+      13
+    ],
+    "--dry-run": [
+      13
+    ],
+    "bin/skeleton init": [
+      14
+    ],
+    "skeleton init <lang> --name=<name> [--dir=DIR]": [
+      14
+    ],
+    "bin/skeleton integrate": [
+      14
+    ],
+    "bin/skeleton doctor": [
+      14
+    ],
+    "bin/skeleton autoskills": [
+      14
+    ],
+    "templates/docs/PLAN.md.stub": [
+      14
+    ],
+    "templates/hooks/go/quality-gates.sh": [
+      15
+    ],
+    "templates/hooks/python/quality-gates.sh": [
+      15
+    ],
+    "templates/hooks/typescript/quality-gates.sh": [
+      15
+    ],
+    "templates/hooks/fullstack/quality-gates.sh": [
+      15
+    ],
+    "templates/hooks/{go,python,typescript,fullstack}/acceptance-gates.sh": [
+      15
+    ],
+    "bin/skeleton hooks regenerate": [
+      15
+    ],
+    "detect_stack(project_root)": [
+      15
+    ],
+    "scripts/pipeline/acceptance.sh": [
+      16
+    ],
+    "run_5b(project_root)": [
+      16
+    ],
+    "run_5c(project_root)": [
+      16
+    ],
+    "feedback_router(failure_class, task_n)": [
+      16
+    ],
+    "lint_build_unit": [
+      16
+    ],
+    "wrong_behavior": [
+      16
+    ],
+    "missing_tests": [
+      16
+    ],
+    "wrong_feature": [
+      16
+    ],
+    "acceptance.max_retries": [
+      16
+    ],
+    "--skip-acceptance": [
+      16
+    ],
+    "--acceptance-only": [
+      16
+    ],
+    "config/phases.yaml": [
+      17
+    ],
+    "README.md": [
+      17
+    ],
+    "docs/PARALLEL_DEV.md": [
+      17
+    ],
+    "skeleton run --dry-run": [
+      17
+    ],
+    "skeleton run 1": [
+      17
+    ],
+    "skeleton run --force-deps 2": [
+      17
+    ],
+    "skeleton doctor": [
+      17
+    ]
+  }
+}

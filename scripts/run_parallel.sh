@@ -1,6 +1,117 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Skeleton Parallel — Parallel Development Orchestrator
+# DEPRECATED — scripts/run_parallel.sh
+# ─────────────────────────────────────────────────────────────────────────────
+# This script is a COMPATIBILITY SHIM for skeleton-parallel v1.0.
+#
+# ⚠  Use 'skeleton run' instead — this shim will be removed in v2.0.
+#
+# Migration map (spec §21.2 / PLAN.md §8.16):
+#   run_parallel.sh start --mode=1 [phases]  →  skeleton run --parallel [tasks]
+#   run_parallel.sh start --mode=2 [phases]  →  skeleton run --sequential [tasks]
+#   run_parallel.sh start --mode=3 [phases]  →  skeleton run [tasks]   (hybrid default)
+#   run_parallel.sh status                   →  skeleton status
+#   run_parallel.sh merge                    →  skeleton merge
+#   run_parallel.sh cleanup                  →  skeleton cleanup
+#   run_parallel.sh gates                    →  skeleton gates
+#
+# Environment variable migration (spec §21.2):
+#   MODEL_HEAVY              →  router.combos.heavy  in config/skeleton.yaml
+#   MODEL_HEAVY_LITE         →  router.combos.heavy_lite
+#   COPILOT_MODEL            →  execution.cli.model
+#   MAX_PARALLEL_AGENTS      →  execution.max_parallel_agents
+#   MAX_RETRIES_PHASE_BUILDER→  retries.task_runner
+#   MAX_RETRIES_DTO          →  retries.dto_guardian
+#   MAX_RETRIES_INTEGRATION  →  retries.integration
+#   MAX_RETRIES_MERGE        →  retries.merge
+#   MAX_RETRIES_GLOBAL_VALIDATION → retries.global_validation
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ── Shim: translate legacy invocation → skeleton run ─────────────────────────
+#
+_RUN_PARALLEL_SHIM=0
+
+# Only activate shim if bin/skeleton is available on PATH or relative to this
+# script. Otherwise fall through to the legacy implementation below.
+_SKELETON_BIN=""
+if command -v skeleton &>/dev/null; then
+    _SKELETON_BIN="skeleton"
+elif [[ -x "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bin/skeleton" ]]; then
+    _SKELETON_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bin/skeleton"
+fi
+
+if [[ -n "${_SKELETON_BIN}" ]]; then
+    # ── Print deprecation warning to stderr ──────────────────────────────────
+    printf '\033[33m[DEPRECATED]\033[0m scripts/run_parallel.sh is deprecated — use '\''skeleton run'\'' instead.\n' >&2
+    printf '\033[33m[DEPRECATED]\033[0m This shim will be removed in v2.0. See docs/PARALLEL_DEV.md §11 for migration.\n' >&2
+    echo "" >&2
+
+    # ── Translate arguments ──────────────────────────────────────────────────
+    _CMD="${1:-start}"
+    shift || true
+
+    case "${_CMD}" in
+        start)
+            _MODE_FLAG=""
+            _TASK_ARGS=()
+
+            for _arg in "$@"; do
+                case "${_arg}" in
+                    --mode=1) _MODE_FLAG="--parallel" ;;
+                    --mode=2) _MODE_FLAG="--sequential" ;;
+                    --mode=3) _MODE_FLAG="" ;;   # hybrid is default
+                    --mode=*) _MODE_FLAG="" ;;
+                    --dry-run) _TASK_ARGS+=("--dry-run") ;;
+                    --no-interactive) _TASK_ARGS+=("--no-interactive") ;;
+                    *) _TASK_ARGS+=("${_arg}") ;;
+                esac
+            done
+
+            # Map legacy env vars to skeleton run env
+            [[ -n "${MODEL_HEAVY:-}" ]] && export SKELETON_MODEL_HEAVY="${MODEL_HEAVY}"
+            [[ -n "${COPILOT_MODEL:-}" ]] && export SKELETON_MODEL="${COPILOT_MODEL}"
+            [[ -n "${MAX_PARALLEL_AGENTS:-}" ]] && export SKELETON_MAX_PARALLEL="${MAX_PARALLEL_AGENTS}"
+
+            _TRANSLATED="skeleton run${_MODE_FLAG:+ ${_MODE_FLAG}}${_TASK_ARGS[*]:+ ${_TASK_ARGS[*]}}"
+            printf '\033[33m[DEPRECATED]\033[0m Translated to: %s\n' "${_TRANSLATED}" >&2
+            echo "" >&2
+
+            exec "${_SKELETON_BIN}" run ${_MODE_FLAG} "${_TASK_ARGS[@]}"
+            ;;
+
+        status)
+            printf '\033[33m[DEPRECATED]\033[0m Translated to: skeleton status\n' >&2
+            exec "${_SKELETON_BIN}" status "$@"
+            ;;
+
+        merge)
+            printf '\033[33m[DEPRECATED]\033[0m Translated to: skeleton merge\n' >&2
+            exec "${_SKELETON_BIN}" merge "$@"
+            ;;
+
+        cleanup)
+            printf '\033[33m[DEPRECATED]\033[0m Translated to: skeleton cleanup\n' >&2
+            exec "${_SKELETON_BIN}" cleanup "$@"
+            ;;
+
+        gates)
+            printf '\033[33m[DEPRECATED]\033[0m Translated to: skeleton gates\n' >&2
+            exec "${_SKELETON_BIN}" gates "$@"
+            ;;
+
+        *)
+            printf '\033[33m[DEPRECATED]\033[0m Unknown command '\''%s'\'' — forwarding to skeleton run\n' "${_CMD}" >&2
+            exec "${_SKELETON_BIN}" run "${_CMD}" "$@"
+            ;;
+    esac
+fi
+
+# ── Legacy fallback: bin/skeleton not found — run original implementation ─────
+# (This preserves backward compatibility for environments where skeleton v1.0
+# has not yet been installed.)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Skeleton Parallel — Parallel Development Orchestrator (LEGACY)
 # ─────────────────────────────────────────────────────────────────────────────
 # 3-mode execution system for running multiple implementation phases
 # simultaneously using autonomous AI agents.
@@ -22,6 +133,7 @@
 #   See docs/PARALLEL_DEV.md for full documentation.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
+
 
 # ── Bash version check (associative arrays require bash 4+) ──────────────
 # If running under bash < 4, attempt to find or install a modern bash and re-exec.

@@ -1,0 +1,14 @@
+{
+  "name": "skeleton-cursor-driver",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Cursor SDK driver (Driver C) for skeleton-parallel — @cursor/sdk wrapper with rate-limit classification",
+  "main": "run.mjs",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^0.1.0"
+  },
+  "license": "MIT"
+}

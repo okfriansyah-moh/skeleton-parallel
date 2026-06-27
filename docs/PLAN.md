@@ -635,6 +635,8 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 ### Task 13 — `skeleton run` Main Orchestrator
 
+<!-- ✅ Task 13 completed -->
+
 **Goal:** Implement `scripts/skeleton-run.sh` — the full pipeline orchestrator that wires Stage −1 through Stage [6] together, with task selection, dependency validation, and scheduling mode dispatch.
 
 **Files to create:**
@@ -665,6 +667,8 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 ---
 
 ### Task 14 — Lifecycle Commands: `init`, `integrate`, `doctor`, `autoskills`
+
+<!-- ✅ Task 14 completed -->
 
 **Goal:** Implement the four core lifecycle commands that scaffold and validate projects, including the brownfield `skeleton integrate` flow (Appendix A checklist) and the `skeleton autoskills` stack-detection agent.
 
@@ -701,7 +705,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 ---
 
-### Task 15 — Hook Templates + T1/T3 Testing Infrastructure
+### Task 15 — Hook Templates + T1/T3 Testing Infrastructure <!-- ✅ Task 15 completed -->
 
 **Goal:** Create quality-gate and acceptance hook templates for all four supported stacks, implement `skeleton hooks regenerate`, and wire T1 (per-task) and T3 (post-integration) hook calls into the pipeline.
 
@@ -730,7 +734,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 ---
 
-### Task 16 — Acceptance Pipeline: `acceptance.sh` + Feedback Router (5b/5c) + Docs Sync [4]
+### Task 16 — Acceptance Pipeline: `acceptance.sh` + Feedback Router (5b/5c) + Docs Sync [4] <!-- ✅ Task 16 completed -->
 
 **Goal:** Implement Stage [5b] acceptance, Stage [5c] test-sufficiency, Stage [4] docs-sync, and the feedback router that re-routes failures back to the appropriate earlier stage.
 
@@ -762,7 +766,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 ---
 
-### Task 17 — Migration Shim + Final Integration Test + Documentation
+### Task 17 — Migration Shim + Final Integration Test + Documentation <!-- ✅ Task 17 completed -->
 
 **Goal:** Complete the `phases.yaml` → PLAN.md migration adapter, validate the full end-to-end pipeline, and update all project documentation to reflect the v1.0 architecture.
 

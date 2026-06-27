@@ -1,5 +1,24 @@
 # Phases Configuration
 # ─────────────────────────────────────────────────────────────────────────────
+# ⚠  DEPRECATED — This file is a compatibility adapter for skeleton-parallel v1.0.
+#
+# Starting with v1.0, tasks are defined in docs/PLAN.md, not here.
+# This file is read by the run_parallel.sh shim for one-release backwards
+# compatibility. It will be removed in v2.0.
+#
+# Migration map (spec §10.5 / PLAN.md §8.16):
+#   config/phases.yaml phase N  →  ### Task N  in docs/PLAN.md
+#   group A/B/C (parallel)      →  deps batching in PLAN.md dep graph
+#   complexity score            →  est. complexity field per task
+#   skills field                →  task-level skills override in PLAN.md
+#
+# To use the new system:
+#   1. Run:  skeleton integrate   (brownfield onboarding)
+#   2. Run:  skeleton run --full  (execute all pending PLAN tasks)
+#   3. See:  docs/PLAN.md         (task definitions + dep graph)
+#   4. See:  docs/PARALLEL_DEV.md §11 (migration guide)
+# ─────────────────────────────────────────────────────────────────────────────
+# Original docs:
 # Define your implementation phases here. This file is read by run_parallel.sh
 # to determine phase names, complexity scores, grouping, and required skills.
 #

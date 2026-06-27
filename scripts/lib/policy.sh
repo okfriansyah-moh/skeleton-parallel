@@ -35,12 +35,11 @@ export PROTECTED_PATHS
 
 # ── _is_safe_rel_path ─────────────────────────────────────────────────────────
 # Returns 0 if the relative path stays within PROJECT_ROOT (no traversal).
+# Portable: does not rely on `realpath -m` (unsupported on macOS BSD realpath).
 _is_safe_rel_path() {
     local rel_path="$1"
-    # Resolve the candidate path and ensure it is rooted under PROJECT_ROOT.
-    local candidate
-    candidate="$(cd "${PROJECT_ROOT}" && realpath -m "${rel_path}" 2>/dev/null || echo "")"
-    [[ -n "${candidate}" && "${candidate}" == "${PROJECT_ROOT}"/* ]]
+    # Reject absolute paths and any path containing '..' traversal components.
+    [[ "${rel_path}" != /* ]] && [[ "${rel_path}" != *..* ]]
 }
 
 # ── _is_existing_file ─────────────────────────────────────────────────────────

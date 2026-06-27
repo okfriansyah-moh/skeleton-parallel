@@ -416,6 +416,10 @@ cmd_init() {
     log_step "Customizing project files..."
     substitute_all "${target_dir}" "${project_name}"
 
+    # ── Step 3.5: Write v1.0 config files ─────────────────────────────────
+    log_step "Writing v1.0 configuration files..."
+    _write_v1_config "${target_dir}" "${project_name}" "${language}"
+
     # ── Step 4: Initialize git ────────────────────────────────────────────
     log_step "Initializing Git repository..."
     (
@@ -442,10 +446,354 @@ cmd_init() {
     echo ""
     echo -e "  ${CYAN}Next steps:${NC}"
     echo -e "    cd ${target_dir}"
-    echo -e "    # Generate architecture:  @workspace Use .github/prompts/architecture.prompt.md"
-    echo -e "    # Generate roadmap:       @workspace Use .github/prompts/roadmap.prompt.md"
-    echo -e "    # Run doctor:             skeleton doctor"
-    echo -e "    # Start parallel dev:     ./scripts/run_parallel.sh start --mode=3 1 2 3"
+    echo -e "    skeleton run --dry-run   # Preview execution plan"
+    echo -e "    skeleton run             # Execute all pending tasks"
+    echo -e "    skeleton doctor          # Run health check"
+    echo -e "    # Legacy: ./scripts/run_parallel.sh start --mode=3 1 2 3"
+    echo ""
+}
+
+# ── _write_v1_config ──────────────────────────────────────────────────────────
+# Write v1.0 config files: .ai/manifest.yaml, config/skeleton.yaml,
+# docs/PLAN.md (from stub), and scripts/hooks/ (from language template).
+# Idempotent: skips existing files.
+_write_v1_config() {
+    local target_dir="$1"
+    local project_name="$2"
+    local language="$3"
+
+    # Write .ai/manifest.yaml from template
+    local ai_dir="${target_dir}/.ai"
+    mkdir -p "${ai_dir}"
+    local manifest_tpl="${SKELETON_ROOT}/templates/ai/manifest.yaml.template"
+    if [[ -f "${manifest_tpl}" ]]; then
+        local esc_name; esc_name="$(_sed_escape "${project_name}")"
+        sed \
+            -e "s/<project-name>/${esc_name}/g" \
+            -e "s/<domain>/${language}/g" \
+            -e "s/<one-line description>/A ${language} project built with skeleton-parallel/g" \
+            "${manifest_tpl}" > "${ai_dir}/manifest.yaml"
+        log_ok ".ai/manifest.yaml created"
+    else
+        log_warn ".ai/manifest.yaml template not found — skipping"
+    fi
+
+    # Write config/skeleton.yaml from template (idempotent)
+    local skeleton_tpl="${SKELETON_ROOT}/config/skeleton.yaml.template"
+    mkdir -p "${target_dir}/config"
+    if [[ -f "${skeleton_tpl}" ]] && [[ ! -f "${target_dir}/config/skeleton.yaml" ]]; then
+        cp "${skeleton_tpl}" "${target_dir}/config/skeleton.yaml"
+        log_ok "config/skeleton.yaml created"
+    elif [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
+        log_info "config/skeleton.yaml already exists — preserved"
+    fi
+
+    # Create docs/PLAN.md from stub (idempotent)
+    local plan_stub="${SKELETON_ROOT}/templates/docs/PLAN.md.stub"
+    mkdir -p "${target_dir}/docs"
+    if [[ -f "${plan_stub}" ]] && [[ ! -f "${target_dir}/docs/PLAN.md" ]]; then
+        local esc_name; esc_name="$(_sed_escape "${project_name}")"
+        sed -e "s/{{PROJECT_NAME}}/${esc_name}/g" "${plan_stub}" > "${target_dir}/docs/PLAN.md"
+        log_ok "docs/PLAN.md created from stub"
+    elif [[ -f "${target_dir}/docs/PLAN.md" ]]; then
+        log_info "docs/PLAN.md already exists — preserved"
+    fi
+
+    # Create scripts/hooks/ from language template (idempotent)
+    local hooks_tpl="${SKELETON_ROOT}/templates/hooks/${language}"
+    local target_hooks="${target_dir}/scripts/hooks"
+    mkdir -p "${target_hooks}"
+    if [[ -d "${hooks_tpl}" ]]; then
+        cp -R "${hooks_tpl}/." "${target_hooks}/"
+        find "${target_hooks}" -name '*.sh' -exec chmod +x {} \;
+        log_ok "scripts/hooks/ created from ${language} template"
+    else
+        # Create minimal stub hooks if no template exists
+        for hook in quality-gates acceptance-gates; do
+            if [[ ! -f "${target_hooks}/${hook}.sh" ]]; then
+                printf '#!/usr/bin/env bash\n# %s.sh — %s\n# TODO: add project-specific gates\nexit 0\n' \
+                    "${hook}" "${project_name}" > "${target_hooks}/${hook}.sh"
+                chmod +x "${target_hooks}/${hook}.sh"
+            fi
+        done
+        log_info "scripts/hooks/ created with stub templates"
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: hooks — manage and regenerate hook scripts (Task 15)
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_hooks() {
+    local subcmd="${1:-help}"
+    shift || true
+
+    case "${subcmd}" in
+        regenerate) _hooks_regenerate "$@" ;;
+        help|--help|-h)
+            echo ""
+            echo "  skeleton hooks regenerate [--dir=DIR]"
+            echo ""
+            echo "  Detects the project stack and copies matching quality-gate"
+            echo "  and acceptance-gate hook scripts to scripts/hooks/."
+            echo ""
+            ;;
+        *)
+            die "Unknown hooks subcommand: ${subcmd}. Use: skeleton hooks regenerate"
+            ;;
+    esac
+}
+
+# ── _hooks_regenerate ─────────────────────────────────────────────────────────
+# Detect stack and install matching hook templates to scripts/hooks/.
+# Supported stacks: go | python | typescript | fullstack | unknown
+#
+# Usage: _hooks_regenerate [--dir=DIR]
+_hooks_regenerate() {
+    local target_dir="."
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir=*) target_dir="${1#*=}"; shift ;;
+            --dir)   target_dir="${2}"; shift 2 ;;
+            *)       target_dir="$1"; shift ;;
+        esac
+    done
+
+    target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+
+    echo ""
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  skeleton hooks regenerate                   ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    # ── Detect stack ─────────────────────────────────────────────────────────
+    local stack
+    stack="$(_detect_stack "${target_dir}")"
+    log_info "Detected stack: ${BOLD}${stack}${NC}"
+
+    local hooks_tpl="${SKELETON_ROOT}/templates/hooks/${stack}"
+
+    # Fallback if no matching template
+    if [[ ! -d "${hooks_tpl}" ]] || [[ "${stack}" == "unknown" ]]; then
+        log_warn "No specific hook template for '${stack}' — using go as fallback"
+        stack="go"
+        hooks_tpl="${SKELETON_ROOT}/templates/hooks/go"
+    fi
+
+    # ── Install hooks ─────────────────────────────────────────────────────────
+    local target_hooks="${target_dir}/scripts/hooks"
+    mkdir -p "${target_hooks}"
+
+    if [[ -d "${hooks_tpl}" ]]; then
+        cp -R "${hooks_tpl}/." "${target_hooks}/"
+        find "${target_hooks}" -name '*.sh' -exec chmod +x {} \;
+        log_ok "Hook scripts installed from '${stack}' template:"
+        for hook in "${target_hooks}"/*.sh; do
+            [[ -f "${hook}" ]] && log_ok "  $(basename "${hook}")"
+        done
+    else
+        log_error "Hook template directory not found: ${hooks_tpl}"
+        return 1
+    fi
+
+    echo ""
+    log_ok "Hooks regenerated for stack: ${BOLD}${stack}${NC}"
+    log_info "  Quality gates:    ${target_dir}/scripts/hooks/quality-gates.sh"
+    log_info "  Acceptance gates: ${target_dir}/scripts/hooks/acceptance-gates.sh"
+    echo ""
+    return 0
+}
+
+# ── _detect_stack ─────────────────────────────────────────────────────────────
+# Detect project stack: go | python | typescript | fullstack | unknown
+# Differs from _detect_language by also detecting fullstack projects.
+_detect_stack() {
+    local dir="$1"
+
+    # Check for fullstack (both backend and frontend indicators)
+    local has_backend=false has_frontend=false
+
+    [[ -f "${dir}/go.mod" ]] && has_backend=true
+    [[ -f "${dir}/pyproject.toml" ]] || [[ -f "${dir}/requirements.txt" ]] && has_backend=true
+    [[ -f "${dir}/pom.xml" ]] || [[ -f "${dir}/build.gradle" ]] && has_backend=true
+
+    for d in frontend web client ui; do
+        if [[ -d "${dir}/${d}" ]] && [[ -f "${dir}/${d}/package.json" ]]; then
+            has_frontend=true
+            break
+        fi
+    done
+
+    if ${has_backend} && ${has_frontend}; then
+        echo "fullstack"
+        return
+    fi
+
+    # Single-stack detection (delegates to existing _detect_language)
+    local lang
+    lang="$(_detect_language "${dir}")"
+    case "${lang}" in
+        typescript|nodejs) echo "typescript" ;;
+        go|python|rust|java) echo "${lang}" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: integrate — brownfield onboarding (Appendix A checklist)
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_integrate() {
+    local target_dir="."
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir=*) target_dir="${1#*=}"; shift ;;
+            --dir)   target_dir="${2}"; shift 2 ;;
+            --no-agent) SKIP_AGENT=true; shift ;;
+            -*)      die "Unknown option: $1" ;;
+            *)       target_dir="$1"; shift ;;
+        esac
+    done
+
+    target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+
+    echo ""
+    echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║  skeleton integrate                          ║${NC}"
+    echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    log_info "Integrating: ${BOLD}${target_dir}${NC}"
+    echo ""
+
+    # ── Step 1: Upgrade framework files ──────────────────────────────────
+    log_step "[1/12] Upgrading framework files (hybrid mode)..."
+    cmd_upgrade --dir="${target_dir}" --mode=hybrid --no-analyze -y 2>/dev/null || \
+        log_warn "Upgrade had minor issues — continuing"
+
+    # ── Step 2: Initialize .ai/ if absent ────────────────────────────────
+    log_step "[2/12] Initializing .ai/ knowledge base..."
+    if [[ ! -d "${target_dir}/.ai" ]]; then
+        if command -v ars &>/dev/null; then
+            (cd "${target_dir}" && ars init 2>/dev/null) || true
+        fi
+        mkdir -p "${target_dir}/.ai"
+        log_ok ".ai/ directory created"
+    else
+        log_info ".ai/ already exists — skipping init"
+    fi
+
+    # ── Step 3: Detect + import legacy provider files ─────────────────────
+    log_step "[3/12] Detecting legacy provider files..."
+    if [[ -f "${SKELETON_ROOT}/scripts/knowledge/detect_legacy.py" ]]; then
+        local detected
+        detected="$(python3 "${SKELETON_ROOT}/scripts/knowledge/detect_legacy.py" \
+            "${target_dir}" 2>/dev/null || echo "[]")"
+        if [[ "${detected}" != "[]" ]] && command -v ars &>/dev/null; then
+            log_info "Legacy sources found — running ars import"
+            (cd "${target_dir}" && ars import '*' 2>/dev/null) || \
+                log_warn "ars import returned non-zero — continuing"
+        else
+            log_info "No legacy sources to import (or ars not installed)"
+        fi
+    fi
+
+    # ── Step 4: Write config/skeleton.yaml ────────────────────────────────
+    log_step "[4/12] Writing runtime config (config/skeleton.yaml)..."
+    mkdir -p "${target_dir}/config"
+    if [[ ! -f "${target_dir}/config/skeleton.yaml" ]]; then
+        local skel_tpl="${SKELETON_ROOT}/config/skeleton.yaml.template"
+        if [[ -f "${skel_tpl}" ]]; then
+            cp "${skel_tpl}" "${target_dir}/config/skeleton.yaml"
+            log_ok "config/skeleton.yaml created"
+        else
+            log_warn "skeleton.yaml.template not found — skipping"
+        fi
+    else
+        log_info "config/skeleton.yaml already exists — preserved"
+    fi
+
+    # ── Step 5: Write .ai/manifest.yaml ───────────────────────────────────
+    log_step "[5/12] Writing identity config (.ai/manifest.yaml)..."
+    mkdir -p "${target_dir}/.ai"
+    if [[ ! -f "${target_dir}/.ai/manifest.yaml" ]]; then
+        local manifest_tpl="${SKELETON_ROOT}/templates/ai/manifest.yaml.template"
+        if [[ -f "${manifest_tpl}" ]]; then
+            local project_name detected_lang
+            project_name="$(basename "${target_dir}")"
+            detected_lang="$(_detect_language "${target_dir}")"
+            local esc_name; esc_name="$(_sed_escape "${project_name}")"
+            sed \
+                -e "s/<project-name>/${esc_name}/g" \
+                -e "s/<domain>/${detected_lang:-unknown}/g" \
+                -e "s/<one-line description>/Integrated with skeleton-parallel/g" \
+                "${manifest_tpl}" > "${target_dir}/.ai/manifest.yaml"
+            log_ok ".ai/manifest.yaml created"
+        else
+            log_warn "manifest.yaml.template not found — skipping"
+        fi
+    else
+        log_info ".ai/manifest.yaml already exists — preserved"
+    fi
+
+    # ── Step 6: ars validate ──────────────────────────────────────────────
+    log_step "[6/12] Running ars validate..."
+    if command -v ars &>/dev/null && [[ -d "${target_dir}/.ai" ]]; then
+        (cd "${target_dir}" && ars validate 2>/dev/null) && log_ok "ars validate passed" || \
+            log_warn "ars validate returned issues — check .ai/ structure"
+    else
+        log_info "ars validate skipped (ars not installed or .ai/ empty)"
+    fi
+
+    # ── Step 7: ars compose ───────────────────────────────────────────────
+    log_step "[7/12] Running ars compose..."
+    if command -v ars &>/dev/null && [[ -d "${target_dir}/.ai" ]]; then
+        (cd "${target_dir}" && ars compose --target copilot 2>/dev/null) && \
+            log_ok "ars compose completed" || \
+            log_warn "ars compose returned issues — continuing"
+    else
+        log_info "ars compose skipped (ars not installed)"
+    fi
+
+    # ── Step 8/9: Router install + OAuth ─────────────────────────────────
+    log_step "[8/12] Router setup (advisory)..."
+    log_info "  Run manually if needed: skeleton router install && skeleton router start"
+    log_step "[9/12] Router OAuth (advisory)..."
+    log_info "  Run manually if needed: skeleton router oauth"
+
+    # ── Step 10: Generate hooks ───────────────────────────────────────────
+    log_step "[10/12] Generating hook templates..."
+    local detected_lang
+    detected_lang="$(_detect_language "${target_dir}")"
+    local hooks_tpl="${SKELETON_ROOT}/templates/hooks/${detected_lang:-go}"
+    local target_hooks="${target_dir}/scripts/hooks"
+    mkdir -p "${target_hooks}"
+    if [[ -d "${hooks_tpl}" ]]; then
+        cp -R "${hooks_tpl}/." "${target_hooks}/"
+        find "${target_hooks}" -name '*.sh' -exec chmod +x {} \;
+        log_ok "Hook scripts installed from ${detected_lang:-go} template"
+    else
+        for hook in quality-gates acceptance-gates; do
+            [[ -f "${target_hooks}/${hook}.sh" ]] && continue
+            printf '#!/usr/bin/env bash\n# %s.sh — stub\nexit 0\n' "${hook}" > \
+                "${target_hooks}/${hook}.sh"
+            chmod +x "${target_hooks}/${hook}.sh"
+        done
+        log_info "scripts/hooks/ created with stubs"
+    fi
+
+    # ── Step 11: skeleton doctor ──────────────────────────────────────────
+    log_step "[11/12] Running health check..."
+    cmd_doctor --dir="${target_dir}" --no-agent || true
+
+    # ── Step 12: Print next step ──────────────────────────────────────────
+    log_step "[12/12] Integration complete!"
+    echo ""
+    log_ok "Project ${BOLD}$(basename "${target_dir}")${NC} is integrated with skeleton-parallel v1.0"
+    echo ""
+    echo -e "  ${CYAN}Next steps:${NC}"
+    echo -e "    skeleton run --dry-run   # Preview execution plan"
+    echo -e "    skeleton run             # Execute all pending tasks"
     echo ""
 }
 
@@ -909,7 +1257,7 @@ _upgrade_replace() {
                AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
         if [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
             cp "${SKELETON_ROOT}/docs/${doc}" "${target_dir}/docs/"
-            ((docs_installed++))
+            docs_installed=$(( docs_installed + 1 ))
         fi
     done
     log_ok "Installed ${docs_installed} doc templates"
@@ -978,7 +1326,7 @@ _upgrade_hybrid() {
         if [[ ! -f "${target_dir}/docs/${doc}" ]] && [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
             cp "${SKELETON_ROOT}/docs/${doc}" "${target_dir}/docs/"
             log_ok "Installed docs/${doc}"
-            ((docs_installed++))
+            docs_installed=$(( docs_installed + 1 ))
         fi
     done
     [[ ${docs_installed} -eq 0 ]] && log_warn "All doc templates already present — nothing to install"
@@ -1052,7 +1400,7 @@ _upgrade_skip() {
         if [[ ! -f "${target_dir}/docs/${doc}" ]] && [[ -f "${SKELETON_ROOT}/docs/${doc}" ]]; then
             cp "${SKELETON_ROOT}/docs/${doc}" "${target_dir}/docs/"
             log_ok "Installed docs/${doc}"
-            ((docs_installed++))
+            docs_installed=$(( docs_installed + 1 ))
         fi
     done
     [[ ${docs_installed} -eq 0 ]] && log_warn "All doc templates already present — nothing to install"
@@ -1142,7 +1490,7 @@ cmd_doctor() {
     local missing_skills=()
     for skill in "${core_skills[@]}"; do
         if [[ -f "${target_dir}/.github/skills/${skill}/SKILL.md" ]]; then
-            ((skill_count++))
+            skill_count=$(( skill_count + 1 ))
         else
             missing_skills+=("${skill}")
         fi
@@ -1164,7 +1512,7 @@ cmd_doctor() {
     local missing_agents=()
     for agent in "${core_agents[@]}"; do
         if [[ -f "${target_dir}/.github/agents/${agent}.agent.md" ]]; then
-            ((agent_count++))
+            agent_count=$(( agent_count + 1 ))
         else
             missing_agents+=("${agent}")
         fi
@@ -1205,6 +1553,69 @@ cmd_doctor() {
     else
         log_warn "Not a Git repository"
         ((warnings++))
+    fi
+
+    # ── v1.0 checks (new in v1.0) ─────────────────────────────────────────
+    echo ""
+    log_step "Checking v1.0 components..."
+
+    # PLAN.md presence
+    _check_exists "docs/PLAN.md" "docs/PLAN.md (task plan)" "warn"
+
+    # .ai/manifest.yaml
+    if [[ -f "${target_dir}/.ai/manifest.yaml" ]]; then
+        log_ok ".ai/manifest.yaml present"
+    else
+        log_warn ".ai/manifest.yaml — MISSING (run: skeleton integrate)"
+        (( warnings++ ))
+    fi
+
+    # config/skeleton.yaml
+    if [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
+        if bash -c "
+            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
+            SKELETON_DRIVER='' load_config '${target_dir}' 2>/dev/null" 2>/dev/null; then
+            log_ok "config/skeleton.yaml present and loadable"
+        else
+            log_warn "config/skeleton.yaml — could not load (run: skeleton integrate)"
+            (( warnings++ ))
+        fi
+    else
+        log_warn "config/skeleton.yaml — MISSING (run: skeleton integrate)"
+        (( warnings++ ))
+    fi
+
+    # ars CLI
+    if command -v ars &>/dev/null; then
+        log_ok "ars CLI found: $(command -v ars)"
+    else
+        log_warn "ars CLI — NOT FOUND (optional; install: https://github.com/okfriansyah-moh/ares)"
+        (( warnings++ ))
+    fi
+
+    # Node.js version check (required only for sdk_cursor driver)
+    if [[ -f "${SKELETON_ROOT}/scripts/lib/config.sh" ]]; then
+        local _drv
+        _drv="$(bash -c "
+            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
+            load_config '${target_dir}' 2>/dev/null
+            echo \"\${SKELETON_DRIVER:-cli_subscription}\"" 2>/dev/null || echo "cli_subscription")"
+        if [[ "${_drv}" == "sdk_cursor" ]]; then
+            if command -v node &>/dev/null; then
+                log_ok "Node.js $(node --version 2>/dev/null) (required for sdk_cursor)"
+            else
+                log_error "Node.js — NOT FOUND (required for driver=sdk_cursor)"
+                (( issues++ ))
+            fi
+        fi
+    fi
+
+    # Driver binary (advisory)
+    if command -v copilot &>/dev/null; then
+        log_ok "Copilot CLI found (cli_subscription/copilot driver)"
+    else
+        log_warn "Copilot CLI — not found (optional; needed for driver=cli_subscription/copilot)"
+        (( warnings++ ))
     fi
 
     # ── Summary ───────────────────────────────────────────────────────────
@@ -2196,10 +2607,13 @@ main() {
     shift
 
     case "${command}" in
+        run)        exec "${SKELETON_ROOT}/scripts/skeleton-run.sh" "$@" ;;
         init)       cmd_init "$@" ;;
         upgrade)    cmd_upgrade "$@" ;;
+        integrate)  cmd_integrate "$@" ;;
         doctor)     cmd_doctor "$@" ;;
         autoskills) cmd_autoskills "$@" ;;
+        hooks)      cmd_hooks "$@" ;;
         add)        cmd_add "$@" ;;
         list)       cmd_list "$@" ;;
         sync)       cmd_sync "$@" ;;

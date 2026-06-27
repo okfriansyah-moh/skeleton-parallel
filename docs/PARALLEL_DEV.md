@@ -1,5 +1,9 @@
 # Parallel Development Guide — `run_parallel.sh`
 
+> ⚠ **DEPRECATED** — This guide covers `run_parallel.sh` (phase-based execution).
+> Starting with skeleton-parallel v1.0, use `skeleton run` instead.
+> See [§11 — Migration Guide](#11-migration-guide-v10) below.
+
 > Operator guide for running multiple implementation phases simultaneously using
 > autonomous AI agents. Supports 3 execution modes that balance speed, cost, and
 > merge complexity.
@@ -619,3 +623,114 @@ All agent subshells are wrapped with `run_with_timeout 1800` (30 minutes default
 A timed-out phase is recorded as `timed_out` in phase-status.json and treated as a
 failure (triggers rollback). Override by setting `AGENT_TIMEOUT_SECONDS` before calling
 the function directly.
+
+---
+
+## 11. Migration Guide (v1.0)
+
+> **This section is canonical.** See also `README.md` for the quick-reference table.
+
+### What changed in v1.0
+
+skeleton-parallel v1.0 replaces the phase-based orchestrator (`run_parallel.sh` +
+`config/phases.yaml`) with a **task-based agentic loop CLI** (`skeleton run` + `docs/PLAN.md`).
+
+The key differences:
+
+| Concept            | v0.x (phases)             | v1.0 (tasks)                                        |
+| ------------------ | ------------------------- | --------------------------------------------------- |
+| Work definition    | `config/phases.yaml`      | `docs/PLAN.md` (### Task N sections)                |
+| Orchestrator       | `scripts/run_parallel.sh` | `scripts/skeleton-run.sh` via `skeleton run`        |
+| State directory    | `.parallel-dev/`          | `.skeleton-dev/` (shim migrates on first run)       |
+| Provider selection | `COPILOT_MODEL` env       | `execution.cli.model` in `config/skeleton.yaml`     |
+| Identity config    | scattered env vars        | `.ai/manifest.yaml`                                 |
+| Hooks              | `scripts/hooks/` (manual) | `skeleton hooks regenerate` + templates             |
+| Execution driver   | Copilot CLI only          | `router_http` \| `cli_subscription` \| `sdk_cursor` |
+
+### Migration steps
+
+```bash
+# 1. Ensure skeleton v1.0 is on PATH
+export PATH="/path/to/skeleton-parallel/bin:$PATH"
+
+# 2. Run the brownfield onboarding checklist (idempotent)
+skeleton integrate
+
+# 3. Verify
+skeleton doctor
+
+# 4. Replace run_parallel.sh invocations
+#    Before:
+./scripts/run_parallel.sh start --mode=3 1 2 3
+#    After:
+skeleton run 1 2 3               # same tasks, hybrid mode (default)
+skeleton run --parallel 1 2 3   # was --mode=1
+skeleton run --sequential 1 2 3 # was --mode=2
+
+# 5. Run the full PLAN
+skeleton run --full
+```
+
+### Environment variable migration
+
+| Old env var                     | New location                                    |
+| ------------------------------- | ----------------------------------------------- |
+| `MODEL_HEAVY`                   | `router.combos.heavy` in `config/skeleton.yaml` |
+| `MODEL_HEAVY_LITE`              | `router.combos.heavy_lite`                      |
+| `COPILOT_MODEL`                 | `execution.cli.model`                           |
+| `MAX_PARALLEL_AGENTS`           | `execution.max_parallel_agents`                 |
+| `MAX_RETRIES_PHASE_BUILDER`     | `retries.task_runner`                           |
+| `MAX_RETRIES_DTO`               | `retries.dto_guardian`                          |
+| `MAX_RETRIES_INTEGRATION`       | `retries.integration`                           |
+| `MAX_RETRIES_MERGE`             | `retries.merge`                                 |
+| `MAX_RETRIES_GLOBAL_VALIDATION` | `retries.global_validation`                     |
+| `AGENT_TIMEOUT_SECONDS`         | `execution.timeout_seconds`                     |
+
+### Compatibility shim
+
+`scripts/run_parallel.sh` acts as a **one-release shim**: it prints a deprecation warning
+and delegates to `skeleton run` with translated flags. It will be **removed in v2.0**.
+
+```bash
+# This still works in v1.0 but prints a deprecation warning:
+./scripts/run_parallel.sh start --mode=1 1 2 3
+# Output:
+# [DEPRECATED] scripts/run_parallel.sh is deprecated — use 'skeleton run' instead.
+# [DEPRECATED] Translated to: skeleton run --parallel 1 2 3
+```
+
+If `bin/skeleton` is not found on PATH, the shim falls back to the legacy implementation
+so existing CI pipelines continue to work during the transition period.
+
+### `.parallel-dev/` → `.skeleton-dev/` migration
+
+On the first `skeleton run`, the state module auto-migrates:
+
+```
+.parallel-dev/state.json  →  .skeleton-dev/run-status.json  (one-time copy)
+```
+
+Both directories coexist during the migration window. `.parallel-dev/` is not deleted
+automatically — remove it manually after verifying `.skeleton-dev/` is correct.
+
+### config/phases.yaml
+
+`config/phases.yaml` is now a **read-only compatibility document**. Its header explains
+the migration. New projects should define tasks in `docs/PLAN.md` only.
+
+The dependency between a `phases.yaml` phase and a `PLAN.md` task is:
+
+```
+config/phases.yaml:
+  0:
+    name: "core-infrastructure"
+    group: "A"
+    complexity: 8
+
+↓ equivalent to ↓
+
+docs/PLAN.md:
+### Task 0 — Core Infrastructure
+**Depends On:** —
+**Est. Complexity:** High
+```
