@@ -9,11 +9,11 @@
 
 | Metric           | Value      |
 | ---------------- | ---------- |
-| **Total Phases** | 17         |
+| **Total Phases** | 18         |
 | **Completed**    | 17         |
 | **In Progress**  | 0          |
 | **Failed**       | 0          |
-| **Not Started**  | 0          |
+| **Not Started**  | 1          |
 | **Last Updated** | 2026-06-27 |
 
 ---

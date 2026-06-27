@@ -184,6 +184,9 @@ output/
 *.sqlite
 *.sqlite3
 
+# Runtime state (append-only logs, per-run status — never commit)
+.skeleton-dev/
+
 # Parallel development state
 .parallel-dev/
 PHASE_TASK.md

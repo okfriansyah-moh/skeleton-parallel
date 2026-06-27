@@ -271,7 +271,8 @@ sync_knowledge() {
         echo ""
         log_ok "[Stage -1] DRY RUN complete — no files written"
     elif [[ -d "${ai_dir}" ]]; then
-        # Stamp was written by compose step above (if compose ran)
+        # Always refresh stamp after sync (import may have mutated .ai/)
+        compose_stamp_write "${ai_dir}" >/dev/null || true
         log_ok "[Stage -1] Knowledge sync complete"
     fi
 }

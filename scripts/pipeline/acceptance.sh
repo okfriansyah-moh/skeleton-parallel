@@ -68,6 +68,7 @@ run_5b() {
         if run_hook "acceptance-gates" "false"; then
             log_ok "[5b] Acceptance gates passed (attempt ${attempt})"
             run_status_write "global-validation-5b" "acceptance" "PASS"
+            _run_5b_llm "${project_root}" || true
             return 0
         fi
 
@@ -83,6 +84,7 @@ run_5b() {
 
     log_error "[5b] Acceptance gates failed after ${MAX_RETRIES_ACCEPTANCE} attempts — blocking PR"
     run_status_write "global-validation-5b" "acceptance" "FAILED"
+    _run_5b_llm "${project_root}" || true
     return 1
 }
 

@@ -102,10 +102,9 @@ while remaining:
             level_batches.append([tid])
         assigned.add(tid)
 
-    # Flatten level_batches into batches (within a level, all are independent)
-    # Merge all level_batches into one batch (they can run in parallel)
-    level_ready = [t for sublist in level_batches for t in sublist]
-    batches.append(sorted(level_ready))
+    # Emit each parallel-safe group as its own batch (batches run serially)
+    for batch in level_batches:
+        batches.append(sorted(batch))
 
     # Update state
     remaining -= assigned
