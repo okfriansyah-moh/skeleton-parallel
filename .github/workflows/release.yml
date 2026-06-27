@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package release tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ARCHIVE="skeleton-parallel-${VERSION}.tar.gz"
+
+          tar -czf "${ARCHIVE}" \
+            --exclude='.git' \
+            --exclude='.skeleton-dev' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            .
+
+          echo "ARCHIVE=${ARCHIVE}" >> "${GITHUB_ENV}"
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "skeleton-parallel ${{ env.VERSION }}"
+          generate_release_notes: true
+          files: ${{ env.ARCHIVE }}
