@@ -9,6 +9,8 @@
 
 **Latest release:** [Download latest](https://github.com/okfriansyah-moh/skeleton-parallel/releases/latest)
 
+**→ [Installation](#installation)** · [Quick Start](#quick-start) · [Commands](#command-reference) · [Pipeline](#pipeline) · [Drivers](#driver-support)
+
 skeleton-parallel lets a team define work once in `docs/PLAN.md`, then execute it autonomously through any AI provider — GitHub Copilot, Claude Code, Cursor, or OpenAI Codex — with a full six-stage validation pipeline and automatic rollback on failure.
 
 The golden rule: every task runs through the same pipeline regardless of which AI driver is active. Switch providers by changing one line in `config/skeleton.yaml`.
@@ -49,60 +51,153 @@ Define work in `docs/PLAN.md`. Let `skeleton run` execute it end-to-end through 
 
 ### Scenarios
 
-**1. You want to execute a PLAN with GitHub Copilot**
+**1. Start a new project from scratch** · `skeleton init`
 
-Your team uses GitHub Copilot. Define tasks in `docs/PLAN.md`, point at the Copilot CLI driver, and run.
+Scaffold a language-specific project with modular monolith architecture, `.ai/` knowledge, config, and hooks on day one.
 
 ```sh
-skeleton init go --name=my-service
-cd my-service
-# edit docs/PLAN.md with your tasks
-skeleton run --full
+skeleton init go --name=my-service          # Go
+skeleton init python --name=my-pipeline     # Python
+skeleton init typescript --name=my-app      # TypeScript
+skeleton init java --name=my-backend        # Java
+skeleton init rust --name=my-lib            # Rust
+skeleton init nodejs --name=my-api          # Node.js
 ```
 
-**2. You want to switch from Copilot to Claude without rewriting anything**
+**2. Execute tasks through any AI provider** · `skeleton run`
 
-Change one line in `config/skeleton.yaml`. The PLAN, hooks, and pipeline stages are unchanged.
+Define tasks in `docs/PLAN.md`, then run the full pipeline — all tasks, one task, or a subset.
+
+```sh
+skeleton run --full          # all pending tasks, hybrid mode
+skeleton run 1 2 3           # specific task IDs
+skeleton run --parallel 2 3 4    # tasks in parallel worktrees (max speed)
+skeleton run --sequential 1 2 3  # strict dependency order, single branch
+skeleton run --driver cli_subscription --full  # override driver at runtime
+```
+
+**3. Switch AI providers without changing anything else** · `config/skeleton.yaml`
+
+Change one line. The PLAN, hooks, pipeline stages, and all commands stay identical.
 
 ```sh
 # config/skeleton.yaml:
 #   execution:
 #     driver: cli_subscription
 #     cli:
-#       provider: claude   ← was: copilot
+#       provider: claude   ← change from: copilot | codex | cursor
 
-skeleton run --full   # same command, different driver
+skeleton run --full   # same command, different provider
 ```
 
-**3. You have an existing repo and want to onboard it**
+**4. Preview execution before running** · `skeleton run --dry-run`
 
-Your repo already has `.github/copilot-instructions.md` and some agents. Import them into `.ai/`, install the router, regenerate hooks.
-
-```sh
-cd existing-repo
-skeleton integrate      # runs full Appendix A checklist
-skeleton doctor         # verify everything is wired
-skeleton run 1 2 3      # execute specific tasks
-```
-
-**4. You want parallel task execution across multiple AI agents**
-
-Tasks with independent file ownership run in parallel worktrees simultaneously, each with their own agent chain.
-
-```sh
-skeleton run --parallel 2 3 4    # tasks 2, 3, 4 in parallel worktrees
-skeleton run --sequential 1 2 3  # strict order, single branch
-skeleton run --full              # hybrid (default): parallel within dep batches
-```
-
-**5. You want a dry run to preview execution before committing**
+Print the full execution plan — tasks, deps, file sets, driver — without invoking any agents or touching git.
 
 ```sh
 skeleton run --dry-run
 skeleton run --dry-run --plan docs/PLAN.md 1 2 3
+skeleton run --dry-run --parallel
 ```
 
-**6. You want CI to run with bounded retries and automatic rollback**
+**5. Onboard an existing repo** · `skeleton integrate`
+
+Your repo already has `.github/copilot-instructions.md`, agents, or hooks. Import everything into `.ai/`, wire the router, and regenerate hooks.
+
+```sh
+cd existing-repo
+skeleton integrate           # runs full Appendix A checklist
+skeleton integrate --dir=./path/to/repo
+```
+
+**6. Validate project health** · `skeleton doctor`
+
+Check that all required tools, config keys, hooks, and `.ai/` structure are wired correctly.
+
+```sh
+skeleton doctor              # checks current directory
+skeleton doctor --dir=../my-project
+```
+
+**7. Upgrade an existing project** · `skeleton upgrade`
+
+Pull the latest framework files (scripts, templates, agents) into a project without overwriting your customizations.
+
+```sh
+skeleton upgrade                        # auto-detect mode
+skeleton upgrade --mode=hybrid          # merge new + keep custom
+skeleton upgrade --mode=replace         # full replacement
+skeleton upgrade --dir=../my-project --no-agent
+```
+
+**8. Auto-detect stack and install matching skills** · `skeleton autoskills`
+
+Scans the project's language, frameworks, and tools, then installs the matching skill modules into `.github/skills/`.
+
+```sh
+skeleton autoskills                     # current directory
+skeleton autoskills --dir=../my-project
+skeleton autoskills --dry-run           # preview only
+skeleton autoskills -y                  # skip confirmation prompts
+```
+
+**9. Add a skill or agent to a project** · `skeleton add`
+
+Install a single named skill or agent from the skeleton-parallel registry into the current project.
+
+```sh
+skeleton add skill security-audit
+skeleton add skill test-generation
+skeleton add agent test-builder
+skeleton add agent conflict-resolver
+```
+
+**10. Browse available resources** · `skeleton list`
+
+List all skills, agents, or language templates available in the registry.
+
+```sh
+skeleton list skills
+skeleton list agents
+skeleton list templates
+```
+
+**11. Sync skills and agents from upstream** · `skeleton sync`
+
+Force-sync all skills, agents, and scripts from the skeleton-parallel upstream into the current project.
+
+```sh
+skeleton sync                     # current directory
+skeleton sync --dir=../my-project
+```
+
+**12. Regenerate hook templates** · `skeleton hooks regenerate`
+
+Copy the language-appropriate hook templates (`quality-gates.sh`, `acceptance-gates.sh`) into `scripts/hooks/`.
+
+```sh
+skeleton hooks regenerate
+skeleton hooks regenerate --dir=../my-project
+```
+
+**13. Check pipeline state** · `skeleton status`
+
+Print the current run state from `.skeleton-dev/run-status.json` — which stages passed, failed, or are in progress.
+
+```sh
+skeleton status
+```
+
+**14. Clean up worktrees and branches** · `skeleton cleanup`
+
+Remove all parallel worktrees, stale task branches, and reset `.skeleton-dev/` state after a run.
+
+```sh
+skeleton cleanup             # prompt before removing
+skeleton cleanup --force     # no prompts
+```
+
+**15. CI with bounded retries and automatic rollback** · `skeleton run --full`
 
 Each task gets a git checkpoint before execution. On retry exhaustion the branch rolls back automatically.
 
@@ -113,18 +208,7 @@ skeleton run --full
 # On acceptance fail:     feedback router re-routes to the correct fix path
 ```
 
-**7. You are starting a new project from scratch**
-
-Scaffold a language-specific project with modular monolith architecture, `.ai/` knowledge, config, and hooks on day one.
-
-```sh
-skeleton init go --name=my-service          # Go
-skeleton init python --name=my-pipeline     # Python
-skeleton init typescript --name=my-app      # TypeScript
-skeleton init java --name=my-backend        # Java
-```
-
-**8. You want to migrate from `run_parallel.sh` + `config/phases.yaml`**
+**16. Migrate from `run_parallel.sh` + `config/phases.yaml`** · `skeleton run`
 
 The old phase-based orchestrator still works via a compatibility shim. Migrate when ready.
 
@@ -134,6 +218,13 @@ The old phase-based orchestrator still works via a compatibility shim. Migrate w
 
 # New equivalent:
 skeleton run 1 2 3
+```
+
+**17. Check version or get help** · `skeleton version` · `skeleton help`
+
+```sh
+skeleton version     # print installed version (derived from git tag)
+skeleton help        # full usage reference with all flags
 ```
 
 ## Installation
