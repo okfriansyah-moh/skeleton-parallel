@@ -172,6 +172,10 @@ cython_debug/
 # Skeleton Parallel — project-specific
 # ─────────────────────────────────────────────────────────────
 
+# Un-ignore scripts/lib/ (overrides the Python `lib/` blanket rule above)
+!scripts/lib/
+!scripts/lib/**
+
 # Pipeline output
 output/
 
