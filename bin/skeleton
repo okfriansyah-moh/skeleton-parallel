@@ -20,11 +20,18 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-VERSION="1.1.0"
-
-# ── Resolve skeleton-parallel root ───────────────────────────────────────────
-SKELETON_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ── Resolve skeleton-parallel root (follow symlink so ~/.local/bin/skeleton works) ──
+_SCRIPT="${BASH_SOURCE[0]}"
+[[ -L "${_SCRIPT}" ]] && _SCRIPT="$(readlink "${_SCRIPT}")"
+SKELETON_BIN="$(cd "$(dirname "${_SCRIPT}")" && pwd)"
 SKELETON_ROOT="$(cd "${SKELETON_BIN}/.." && pwd)"
+
+# Derive version from the git tag; fall back to the embedded default.
+VERSION="$(git -C "${SKELETON_ROOT}" describe --tags --exact-match 2>/dev/null \
+           | sed 's/^v//' \
+           || git -C "${SKELETON_ROOT}" describe --tags --always 2>/dev/null \
+           | sed 's/^v//' \
+           || echo "0.2.0")"
 TEMPLATES_DIR="${SKELETON_ROOT}/templates"
 
 # ── Copilot Agent Configuration ─────────────────────────────────────────────
