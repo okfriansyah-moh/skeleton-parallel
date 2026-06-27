@@ -265,7 +265,7 @@ Skills are pre-digested knowledge packages that agents load on-demand. They live
 ├── performance-optimization/SKILL.md # Performance profiling patterns
 ├── caveman/SKILL.md                 # Ultra-compressed output mode (~75% fewer tokens)
 ├── brainstorming/SKILL.md           # Design-first gate before any implementation
-├── writing-plans/SKILL.md           # Break work into bite-sized implementation tasks
+├── plan-management/SKILL.md           # Break work into bite-sized implementation tasks
 ├── subagent-driven-development/SKILL.md # Fresh subagent per task + 2-stage review
 ├── test-driven-development/SKILL.md # RED-GREEN-REFACTOR cycle enforcement
 ├── rtk/SKILL.md                     # Token-efficient CLI proxy (60-90% savings)
@@ -288,12 +288,12 @@ These skills apply to **every agent and every task** without explicit loading:
 | ----------------------------- | --------- | --------------------------------------------------------------------- |
 | `caveman`                     | ✅        | Compress output ~75% when user requests it — no filler, full accuracy |
 | `brainstorming`               | ✅        | Design-first gate — NEVER write code before presenting a design       |
-| `writing-plans`               | ✅        | After design approval, break into 2-5 min tasks before implementing   |
+| `plan-management`               | ✅        | After design approval, break into 2-5 min tasks before implementing   |
 | `subagent-driven-development` | ✅        | Dispatch fresh subagent per task with 2-stage spec + quality review   |
 | `test-driven-development`     | ✅        | No production code without a failing test first                       |
 | `rtk`                         | ✅        | Use `rtk <cmd>` for terminal output compression (60-90% savings)      |
 
-> **Superpowers shorthand:** `brainstorming` + `writing-plans` + `subagent-driven-development` + `test-driven-development` are collectively called **superpowers** and are always active.
+> **Superpowers shorthand:** `brainstorming` + `plan-management` + `subagent-driven-development` + `test-driven-development` are collectively called **superpowers** and are always active.
 
 ### Agent–Skill Composition
 
@@ -314,7 +314,7 @@ Each agent declares its skills in a `## Skills Used` section.
 | coding-standards            |              |             |              | ✅            | ✅             | ✅       |                   | ✅             |     | coding-standards |     |     |     | ✅  | ✅  | ✅  |     | ✅  |     | database-portability |     | ✅  | ✅  | ✅  |     |     |     | ✅  |
 | token-optimization          |              |             |              | ✅            |                |          |                   |                |
 | brainstorming               |              |             | ✅           | ✅            | ✅             |          |                   |                |
-| writing-plans               |              |             | ✅           | ✅            |                |          |                   |                |
+| plan-management               |              |             | ✅           | ✅            |                |          |                   |                |
 | subagent-driven-development |              |             | ✅           | ✅            |                |          |                   | ✅             |
 | test-driven-development     |              |             |              |               | ✅             | ✅       |                   |                |
 | docs-sync                   | ✅           | ✅          |              |               |                |          |                   | ✅             |
@@ -337,7 +337,7 @@ Each agent declares its skills in a `## Skills Used` section.
 | dto                         |          |                  | ✅           |                 |        |
 | pipeline                    |          |                  |              | ✅              |        |
 | brainstorming               | ✅       |                  |              | ✅              |        |
-| writing-plans               | ✅       |                  |              | ✅              |        |
+| plan-management               | ✅       |                  |              | ✅              |        |
 | subagent-driven-development | ✅       |                  |              | ✅              |        |
 | caveman                     | ✅       | ✅               | ✅           | ✅              | ✅     |
 | rtk                         | ✅       | ✅               | ✅           | ✅              | ✅     |

@@ -28,12 +28,12 @@ You are a Framework Integration Specialist that upgrades existing repositories t
 - `.github/skills/pipeline/SKILL.md` — stage ordering and dependencies
 - `.github/skills/modularity/SKILL.md` — module boundary enforcement
 - `.github/skills/brainstorming/SKILL.md` — design-first gate before any implementation
-- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/plan-management/SKILL.md` — break work into bite-sized tasks
 - `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
 - `.github/skills/caveman/SKILL.md` — compressed output mode
 - `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 - `.github/skills/brainstorming/SKILL.md` — design-first gate before any implementation
-- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/plan-management/SKILL.md` — break work into bite-sized tasks
 - `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
 - `.github/skills/caveman/SKILL.md` — compressed output mode
 - `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy

@@ -16,8 +16,15 @@
 @workspace Use .github/prompts/orchestrator.prompt.md to generate docs/orchestrator_spec.md
 @workspace Use .github/prompts/db_adapter.prompt.md to generate docs/db_adapter_spec.md
 
-# Implement Phase 0
-@phase-builder implement Phase 0
+# Generate executable PLAN
+@workspace Follow .github/skills/plan-management/SKILL.md (create mode) to generate docs/PLAN.md from docs/specs/2026-06-27-agentic-loop-cli-design.md
+
+# Execute PLAN task end-to-end
+@task-runner implement Task 1
+@workspace Use .github/prompts/implement-and-review-task.prompt.md with TASK_NUMBER=1
+
+# PR remediation support
+@workspace Use .github/prompts/pr-remediation.prompt.md on the current diff/PR
 
 # Run parallel development
 ./scripts/run_parallel.sh start --mode=3 1 2 3

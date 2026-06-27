@@ -29,12 +29,12 @@ You are a Project Initialization Specialist that creates new skeleton-parallel p
 - `.github/skills/code-quality/SKILL.md` — type annotations, logging, code standards
 - `.github/skills/modularity/SKILL.md` — module boundaries and import rules
 - `.github/skills/brainstorming/SKILL.md` — design-first gate before any implementation
-- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/plan-management/SKILL.md` — break work into bite-sized tasks
 - `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
 - `.github/skills/caveman/SKILL.md` — compressed output mode
 - `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 - `.github/skills/brainstorming/SKILL.md` — design-first gate before any implementation
-- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/plan-management/SKILL.md` — break work into bite-sized tasks
 - `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
 - `.github/skills/caveman/SKILL.md` — compressed output mode
 - `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy

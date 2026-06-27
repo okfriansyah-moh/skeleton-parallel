@@ -4,6 +4,8 @@
 > autonomous AI agents. Supports 3 execution modes that balance speed, cost, and
 > merge complexity.
 
+> Migration note: for PLAN-based execution, use `@task-runner` with `.github/prompts/implement-and-review-task.prompt.md` per task and `.github/prompts/pr-remediation.prompt.md` for remediation cycles.
+
 ---
 
 ## 1. Overview

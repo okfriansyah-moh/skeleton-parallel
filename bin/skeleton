@@ -31,7 +31,7 @@ TEMPLATES_DIR="${SKELETON_ROOT}/templates"
 COPILOT_MODEL="${COPILOT_MODEL:-claude-sonnet-4.6}"
 COPILOT_LOG_DIR=".parallel-dev/agent-logs"
 # All 28 skills — injected into every agent prompt
-COPILOT_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, writing-plans, subagent-driven-development, test-driven-development, rtk"
+COPILOT_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, plan-management, subagent-driven-development, test-driven-development, rtk"
 # Workspace constraint — prevent agents from writing outside project
 COPILOT_WORKSPACE_CONSTRAINT="WORKSPACE CONSTRAINT: NEVER write files outside this project directory. Use .parallel-dev/ for temporary artifacts and output/ for generated files."
 
@@ -434,7 +434,7 @@ cmd_init() {
     # ── Step 6: Spawn Copilot agent for project validation ────────────────
     log_step "Spawning Copilot agent for project validation..."
     _spawn_copilot_agent "${target_dir}" "scaffold" \
-        "You are validating a newly initialized ${language} project named '${project_name}'. Perform a complete validation: 1) All docs/ templates exist (architecture.md, dto_contracts.md, orchestrator_spec.md, db_adapter_spec.md, implementation_roadmap.md, PARALLEL_DEV.md, AGENTS_AND_SKILLS.md, STARTER_GUIDE.md, PROGRESS_REPORT.md). 2) config/phases.yaml is present and properly structured. 3) scripts/run_parallel.sh is present and executable. 4) .github/ has all 28 skills, 14 agents, 5 prompts, and copilot-instructions.md. 5) Language-specific structure (${language}) matches skeleton-parallel modular monolith standards — contracts/ for DTOs, database/ for adapter, app/modules/ or src/modules/ for domain modules. 6) Health module reference implementation exists and is properly wired. 7) Ensure the project can seamlessly run parallel development via run_parallel.sh. Fix any issues found. After fixing, commit changes with message 'chore: post-init validation fixes'." \
+        "You are validating a newly initialized ${language} project named '${project_name}'. Perform a complete validation: 1) All docs/ templates exist (architecture.md, dto_contracts.md, orchestrator_spec.md, db_adapter_spec.md, implementation_roadmap.md, PARALLEL_DEV.md, AGENTS_AND_SKILLS.md, STARTER_GUIDE.md, PROGRESS_REPORT.md). 2) config/phases.yaml is present and properly structured. 3) scripts/run_parallel.sh is present and executable. 4) .github/ has all 28 skills, 15 agents, 7 prompts, and copilot-instructions.md. 5) Language-specific structure (${language}) matches skeleton-parallel modular monolith standards — contracts/ for DTOs, database/ for adapter, app/modules/ or src/modules/ for domain modules. 6) Health module reference implementation exists and is properly wired. 7) Ensure the project can seamlessly run parallel development via run_parallel.sh. Fix any issues found. After fixing, commit changes with message 'chore: post-init validation fixes'." \
         "init-validation"
 
     echo ""
@@ -1136,7 +1136,7 @@ cmd_doctor() {
                        "test-generation" "vertical-slice" "api-design"
                        "project-scaffold" "dependency-analysis" "migration-management"
                        "performance-optimization" "caveman" "brainstorming"
-                       "writing-plans" "subagent-driven-development"
+                       "plan-management" "subagent-driven-development"
                        "test-driven-development" "rtk")
     local skill_count=0
     local missing_skills=()
@@ -1510,7 +1510,7 @@ ${available_skills_list}
 SKILL REFERENCE (name → what it does):
 running-prompt: structured task execution workflow (planning, security review, verification)
 brainstorming: design-first gate — present a design before any implementation
-writing-plans: convert approved design into bite-sized implementation tasks
+plan-management: convert approved design into bite-sized implementation tasks
 subagent-driven-development: dispatch fresh subagent per task + 2-stage review
 test-driven-development: RED-GREEN-REFACTOR cycle enforcement
 code-quality: type annotations, structured logging, no anti-patterns
@@ -1566,7 +1566,7 @@ _autoskills_static_map() {
 
     local -a skills
     skills=("running-prompt" "code-quality" "coding-standards" "security-audit"
-            "token-optimization" "brainstorming" "writing-plans" "subagent-driven-development")
+            "token-optimization" "brainstorming" "plan-management" "subagent-driven-development")
 
     case "${detected_lang}" in
         go|python|rust)
@@ -1638,7 +1638,7 @@ dto, pipeline, modularity, determinism, idempotency, failure, config-validation,
 coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization,
 running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold,
 dependency-analysis, migration-management, performance-optimization, caveman, brainstorming,
-writing-plans, subagent-driven-development, test-driven-development, rtk
+plan-management, subagent-driven-development, test-driven-development, rtk
 
 INSTRUCTIONS:
 1. Explore key source files to understand the project's business domain and unique technical patterns
@@ -1702,7 +1702,7 @@ dto, pipeline, modularity, determinism, idempotency, failure, config-validation,
 coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization,
 running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold,
 dependency-analysis, migration-management, performance-optimization, caveman, brainstorming,
-writing-plans, subagent-driven-development, test-driven-development, rtk
+plan-management, subagent-driven-development, test-driven-development, rtk
 
 INSTRUCTIONS:
 1. If a manifest exists at ${manifest_file}, generate ONLY the skills listed there

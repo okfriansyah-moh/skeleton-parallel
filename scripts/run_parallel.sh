@@ -114,7 +114,7 @@ MAX_RETRIES_SECURITY="${MAX_RETRIES_SECURITY:-3}"
 MAX_RETRIES_TESTS="${MAX_RETRIES_TESTS:-3}"
 
 # All 28 skills — injected into every Copilot call so agents always have full knowledge access
-CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, writing-plans, subagent-driven-development, test-driven-development, rtk"
+CORE_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, plan-management, subagent-driven-development, test-driven-development, rtk"
 
 # Workspace confinement rule — injected into every agent prompt
 # Prevents agents from writing to /tmp or paths outside the project (Permission denied errors)
@@ -1077,7 +1077,7 @@ generate_phase_task() {
    - `performance-optimization` — Profiling, query optimization
    - `caveman` — Ultra-compressed output (~75% fewer tokens)
    - `brainstorming` — Design-first gate before implementation
-   - `writing-plans` — Break work into bite-sized tasks
+   - `plan-management` — Break work into bite-sized tasks
    - `subagent-driven-development` — Fresh subagent per task + 2-stage review
    - `test-driven-development` — RED-GREEN-REFACTOR cycle enforcement
    - `rtk` — Token-efficient CLI proxy (60-90% savings)

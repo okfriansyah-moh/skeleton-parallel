@@ -76,9 +76,9 @@ Ask the user to review before proceeding:
 
 Wait for approval. Only proceed once the user approves.
 
-### Step 8 — Invoke `writing-plans` skill
+### Step 8 — Invoke `plan-management` skill
 
-Transition to implementation by loading the `writing-plans` skill.
+Transition to implementation by loading the `plan-management` skill.
 
 ---
 
@@ -90,10 +90,10 @@ Explore context
     → Propose 2-3 approaches with trade-offs
       → Present design sections → user approves each section
         → Write spec doc → self-review → user review gate
-          → writing-plans skill (ONLY skill invoked after this)
+          → plan-management skill (ONLY skill invoked after this)
 ```
 
-**Terminal state is writing-plans.** Do not invoke any implementation skill directly.
+**Terminal state is plan-management.** Do not invoke any implementation skill directly.
 
 ---
 
@@ -120,4 +120,4 @@ Explore context
 - [ ] Spec self-review passed (no placeholders, no contradictions)
 - [ ] User reviewed and approved spec
 - [ ] DTO inputs/outputs defined
-- [ ] Ready to invoke `writing-plans`
+- [ ] Ready to invoke `plan-management`

@@ -17,7 +17,7 @@ Execute a plan by dispatching fresh subagents per task, with two-stage review af
 
 ## When to Use
 
-- You have an implementation plan (from `writing-plans` skill)
+- You have an implementation plan (from `plan-management` skill)
 - Tasks are mostly independent (sequential, not tightly coupled)
 - You want quality gates without manual review loops
 - Use `phase-builder` instead when tasks should run in parallel sessions

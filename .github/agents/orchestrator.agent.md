@@ -16,12 +16,12 @@ You are a pipeline orchestrator specialist. Your job is to build and validate th
 - `.github/skills/failure/SKILL.md` — retry, abort, and degradation rules
 - `.github/skills/database-portability/SKILL.md` — portable SQL and adapter rules
 - `.github/skills/brainstorming/SKILL.md` — design-first gate before any implementation
-- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/plan-management/SKILL.md` — break work into bite-sized tasks
 - `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
 - `.github/skills/caveman/SKILL.md` — compressed output mode
 - `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
 - `.github/skills/brainstorming/SKILL.md` — design-first gate before any implementation
-- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/plan-management/SKILL.md` — break work into bite-sized tasks
 - `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
 - `.github/skills/caveman/SKILL.md` — compressed output mode
 - `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy

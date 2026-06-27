@@ -29,6 +29,7 @@ Agents consume skills to minimize token usage while maintaining constraint enfor
 | module-builder    | `.github/agents/module-builder.agent.md`    | Implement individual modules from specs        |
 | conflict-resolver | `.github/agents/conflict-resolver.agent.md` | Resolve Git merge conflicts (union strategy)   |
 | merge-reviewer    | `.github/agents/merge-reviewer.agent.md`    | Post-merge validation and quality review       |
+| task-runner       | `.github/agents/task-runner.agent.md`       | Implement one `docs/PLAN.md` task end-to-end   |
 | task-sync         | `.github/agents/task-sync.agent.md`         | Structured task execution workflow             |
 
 ### Framework Agents
@@ -66,6 +67,7 @@ phase-builder → dto-guardian → integration → refactor (conditional)
 | module-builder    | ✅       | ✅       | ✅            | ❌          | ❌                                               |
 | conflict-resolver | ✅       | ✅       | ❌            | ❌          | ❌                                               |
 | merge-reviewer    | ✅       | ❌       | ✅            | ❌          | ✅ (dto-guardian, integration)                   |
+| task-runner       | ✅       | ✅       | ✅            | ❌          | ✅ (Explore)                                     |
 | task-sync         | ✅       | ✅       | ✅            | ❌          | ✅ (subagents)                                   |
 | scaffold          | ✅       | ✅       | ✅            | ❌          | ✅ (dto-guardian, doctor)                        |
 | security-auditor  | ✅       | ❌       | ❌            | ❌          | ✅ (test-builder)                                |
@@ -98,23 +100,23 @@ phase-builder → dto-guardian → integration → refactor (conditional)
 
 ### Framework Skills
 
-| Skill                       | File                                                  | Purpose                                     |
-| --------------------------- | ----------------------------------------------------- | ------------------------------------------- |
-| security-audit              | `.github/skills/security-audit/SKILL.md`              | OWASP security auditing, CVSS scoring       |
-| test-generation             | `.github/skills/test-generation/SKILL.md`             | Test patterns, coverage, AAA structure      |
-| vertical-slice              | `.github/skills/vertical-slice/SKILL.md`              | Feature-per-folder architecture             |
-| api-design                  | `.github/skills/api-design/SKILL.md`                  | REST/gRPC API patterns, error formats       |
-| project-scaffold            | `.github/skills/project-scaffold/SKILL.md`            | Project initialization and validation       |
-| dependency-analysis         | `.github/skills/dependency-analysis/SKILL.md`         | Import graph and coupling analysis          |
-| migration-management        | `.github/skills/migration-management/SKILL.md`        | Database migration best practices           |
-| performance-optimization    | `.github/skills/performance-optimization/SKILL.md`    | Performance profiling and optimization      |
-| caveman                     | `.github/skills/caveman/SKILL.md`                     | Ultra-compressed output (~75% fewer tokens) |
-| brainstorming               | `.github/skills/brainstorming/SKILL.md`               | Design-first gate before any implementation |
-| writing-plans               | `.github/skills/writing-plans/SKILL.md`               | Break work into bite-sized tasks            |
-| subagent-driven-development | `.github/skills/subagent-driven-development/SKILL.md` | Fresh subagent per task + 2-stage review    |
-| test-driven-development     | `.github/skills/test-driven-development/SKILL.md`     | RED-GREEN-REFACTOR cycle enforcement        |
-| rtk                         | `.github/skills/rtk/SKILL.md`                         | Token-efficient CLI proxy (60-90% savings)  |
-| roadmap-spec                | `.github/skills/roadmap-spec/SKILL.md`                | Execution-grade phase spec (11 sections)    |
+| Skill                       | File                                                  | Purpose                                      |
+| --------------------------- | ----------------------------------------------------- | -------------------------------------------- |
+| security-audit              | `.github/skills/security-audit/SKILL.md`              | OWASP security auditing, CVSS scoring        |
+| test-generation             | `.github/skills/test-generation/SKILL.md`             | Test patterns, coverage, AAA structure       |
+| vertical-slice              | `.github/skills/vertical-slice/SKILL.md`              | Feature-per-folder architecture              |
+| api-design                  | `.github/skills/api-design/SKILL.md`                  | REST/gRPC API patterns, error formats        |
+| project-scaffold            | `.github/skills/project-scaffold/SKILL.md`            | Project initialization and validation        |
+| dependency-analysis         | `.github/skills/dependency-analysis/SKILL.md`         | Import graph and coupling analysis           |
+| migration-management        | `.github/skills/migration-management/SKILL.md`        | Database migration best practices            |
+| performance-optimization    | `.github/skills/performance-optimization/SKILL.md`    | Performance profiling and optimization       |
+| caveman                     | `.github/skills/caveman/SKILL.md`                     | Ultra-compressed output (~75% fewer tokens)  |
+| brainstorming               | `.github/skills/brainstorming/SKILL.md`               | Design-first gate before any implementation  |
+| plan-management             | `.github/skills/plan-management/SKILL.md`             | Break work into bite-sized tasks             |
+| subagent-driven-development | `.github/skills/subagent-driven-development/SKILL.md` | Fresh subagent per task + 2-stage review     |
+| test-driven-development     | `.github/skills/test-driven-development/SKILL.md`     | RED-GREEN-REFACTOR cycle enforcement         |
+| rtk                         | `.github/skills/rtk/SKILL.md`                         | Token-efficient CLI proxy (60-90% savings)   |
+| roadmap-spec                | `.github/skills/roadmap-spec/SKILL.md`                | Execution-grade phase spec (11 sections)     |
 | parallel-dev                | `.github/skills/parallel-dev/SKILL.md`                | PARALLEL_DEV.md operator guide (10 sections) |
 
 ### Skill Structure
@@ -159,17 +161,18 @@ Pre-commit verification items.
 
 ### Core Pipeline Agents
 
-| Agent             | Always Loads                                | Loads On-Demand                             |
-| ----------------- | ------------------------------------------- | ------------------------------------------- |
-| phase-builder     | dto, modularity, pipeline                   | determinism, idempotency, config-validation |
-| dto-guardian      | dto, modularity                             | determinism, docs-sync                      |
-| integration       | pipeline, dto, database-portability         | idempotency, failure, docs-sync             |
-| refactor          | modularity, code-quality                    | determinism                                 |
-| orchestrator      | pipeline, idempotency, database-portability | failure                                     |
-| module-builder    | dto, modularity, code-quality               | determinism, idempotency, config-validation |
-| conflict-resolver | conflict-resolution                         | dto, modularity                             |
-| merge-reviewer    | dto, pipeline, modularity                   | docs-sync                                   |
-| task-sync         | running-prompt, modularity                  | dto, pipeline, code-quality                 |
+| Agent             | Always Loads                                    | Loads On-Demand                             |
+| ----------------- | ----------------------------------------------- | ------------------------------------------- |
+| phase-builder     | dto, modularity, pipeline                       | determinism, idempotency, config-validation |
+| task-runner       | plan-management, code-quality, coding-standards | token-optimization, docs-sync               |
+| dto-guardian      | dto, modularity                                 | determinism, docs-sync                      |
+| integration       | pipeline, dto, database-portability             | idempotency, failure, docs-sync             |
+| refactor          | modularity, code-quality                        | determinism                                 |
+| orchestrator      | pipeline, idempotency, database-portability     | failure                                     |
+| module-builder    | dto, modularity, code-quality                   | determinism, idempotency, config-validation |
+| conflict-resolver | conflict-resolution                             | dto, modularity                             |
+| merge-reviewer    | dto, pipeline, modularity                       | docs-sync                                   |
+| task-sync         | running-prompt, modularity                      | dto, pipeline, code-quality                 |
 
 ### Framework Agents
 

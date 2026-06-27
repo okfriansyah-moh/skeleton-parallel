@@ -28,6 +28,9 @@ cd my-service
 
 # Verify setup
 skeleton doctor
+
+# Domain skills for this codebase (framework + project-specific)
+skeleton autoskills
 ```
 
 Supported languages: `go`, `python`, `typescript`, `nodejs`, `rust`, `java`
@@ -36,9 +39,25 @@ The CLI creates a complete project with:
 
 - Modular monolith structure with health module reference implementation
 - All framework files (.github/, scripts/, config/, docs/)
-- 28 skills, 14 agents, 5 prompts pre-installed
+- 28 skills, 15 agents, 7 prompts pre-installed
 - Language-specific build/test tooling
 - Git repository initialized
+
+After v1 ([agentic loop CLI spec](specs/2026-06-27-agentic-loop-cli-design.md)), `init` also scaffolds `.ai/`, `config/skeleton.yaml`, hook templates, and a `docs/PLAN.md` stub. `autoskills` will install domain skills into `.ai/skills/` first.
+
+### CLI command families
+
+| Family                     | Commands                                                             | Purpose                           |
+| -------------------------- | -------------------------------------------------------------------- | --------------------------------- |
+| **Lifecycle** (maintained) | `init`, `upgrade`, `doctor`, `autoskills`, `sync`, `add`, `list`     | Scaffold, validate, domain skills |
+| **Lifecycle** (v1)         | `integrate`, `context`, `hooks regenerate`, `knowledge status`       | Brownfield ARES + router setup    |
+| **Execution** (v1)         | `run`, `merge`, `goal`, `router *`, `plan list`, `status`, `cleanup` | PLAN.md agentic loop              |
+
+**Greenfield flow:** `init` → `doctor` → `autoskills` → `docs/PLAN.md` → `skeleton run` (v1) or `run_parallel.sh` (today).
+
+**Brownfield flow:** `integrate` (v1) or `upgrade` (today) → `doctor` → `autoskills` → `skeleton run`.
+
+See [specs/2026-06-27-agentic-loop-cli-design.md](specs/2026-06-27-agentic-loop-cli-design.md) §25 for lifecycle command details.
 
 ### Option B: Upgrade an Existing Repository
 
@@ -47,6 +66,8 @@ cd existing-project
 skeleton upgrade            # Auto-detects existing mechanisms, prompts Replace/Hybrid/Skip
 skeleton upgrade --mode=hybrid  # Force hybrid mode (merge additively)
 skeleton doctor
+skeleton autoskills
+# skeleton integrate        # v1 — full brownfield: .ai/ + 9router + hooks (use instead of upgrade alone)
 ```
 
 The upgrade command now:
@@ -132,25 +153,32 @@ Generate the remaining specification documents:
 @workspace Use .github/prompts/db_adapter.prompt.md to generate docs/db_adapter_spec.md
 ```
 
-### Step 5: Implement Phase 0 (Infrastructure)
+### Step 5: Generate docs/PLAN.md
 
-Phase 0 creates the foundation. Always implement this first:
+Use plan-management to generate your executable plan from approved specs:
 
 ```
-@phase-builder implement Phase 0
+@workspace Follow .github/skills/plan-management/SKILL.md (create mode) to generate docs/PLAN.md from docs/specs/2026-06-27-agentic-loop-cli-design.md
 ```
 
-This creates:
+### Step 6: Execute docs/PLAN.md tasks
 
-- Database schema and migrations
-- Database adapter
-- Configuration loader
-- Entry point
-- Orchestrator skeleton
+Use the PLAN execution stack for each task:
 
-### Step 6: Run Parallel Development
+```
+@task-runner implement Task 1
+@workspace Use .github/prompts/implement-and-review-task.prompt.md with TASK_NUMBER=1
+```
 
-Once Phase 0 is complete, run remaining phases in parallel:
+For review/remediation cycles:
+
+```
+@workspace Use .github/prompts/pr-remediation.prompt.md on the current diff/PR
+```
+
+### Step 7: Run development
+
+**Today (phase-based):** Once Phase 0 is complete, run remaining phases:
 
 ```bash
 # Mode 3 (Hybrid) — recommended default
@@ -162,6 +190,15 @@ Once Phase 0 is complete, run remaining phases in parallel:
 # Mode 2 (Token-Optimized) — minimum cost
 ./scripts/run_parallel.sh start --mode=2 1 2 3
 ```
+
+**Planned (PLAN-based):** After `docs/PLAN.md` exists:
+
+```bash
+skeleton run --full              # all pending tasks, hybrid default
+skeleton run 1 2 3               # specific tasks, full pipeline
+```
+
+See [specs/2026-06-27-agentic-loop-cli-design.md](specs/2026-06-27-agentic-loop-cli-design.md).
 
 ---
 
@@ -181,14 +218,17 @@ skeleton-parallel/
 │   └── java/                      # Java template
 ├── .github/
 │   ├── copilot-instructions.md    # Hard architectural constraints (always loaded)
-│   ├── prompts/                   # One-shot generation prompts
+│   ├── prompts/                   # One-shot + execution prompts
 │   │   ├── architecture.prompt.md
 │   │   ├── roadmap.prompt.md
 │   │   ├── orchestrator.prompt.md
 │   │   ├── dto.prompt.md
-│   │   └── db_adapter.prompt.md
-│   ├── agents/                    # Autonomous execution agents (14 total)
+│   │   ├── db_adapter.prompt.md
+│   │   ├── implement-and-review-task.prompt.md
+│   │   └── pr-remediation.prompt.md
+│   ├── agents/                    # Autonomous execution agents (15 total)
 │   │   ├── phase-builder.agent.md     # Core pipeline agents
+│   │   ├── task-runner.agent.md
 │   │   ├── dto-guardian.agent.md
 │   │   ├── integration.agent.md
 │   │   ├── refactor.agent.md
@@ -227,7 +267,7 @@ skeleton-parallel/
 │       ├── performance-optimization/SKILL.md
 │       ├── caveman/SKILL.md           # Always-active skills
 │       ├── brainstorming/SKILL.md
-│       ├── writing-plans/SKILL.md
+│       ├── plan-management/SKILL.md
 │       ├── subagent-driven-development/SKILL.md
 │       ├── test-driven-development/SKILL.md
 │       └── rtk/SKILL.md

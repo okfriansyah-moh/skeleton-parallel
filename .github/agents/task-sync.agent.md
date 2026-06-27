@@ -33,7 +33,7 @@ You are a **Principle-Driven Flow Architect**—balancing high-velocity executio
 - `.github/skills/security-audit/SKILL.md` — OWASP security patterns for review steps
 - `.github/skills/code-quality/SKILL.md` — production-readiness checks
 - `.github/skills/brainstorming/SKILL.md` — design-first gate for high-risk changes
-- `.github/skills/writing-plans/SKILL.md` — break work into bite-sized tasks
+- `.github/skills/plan-management/SKILL.md` — break work into bite-sized tasks
 - `.github/skills/subagent-driven-development/SKILL.md` — fresh subagent per task + 2-stage review
 - `.github/skills/caveman/SKILL.md` — compressed output mode
 - `.github/skills/rtk/SKILL.md` — token-efficient CLI proxy
