@@ -28,6 +28,10 @@ source "${_CHECKPOINT_LIB_DIR}/common.sh"
 # Usage: checkpoint_create <task_n>
 checkpoint_create() {
     local task_n="${1:?task_n required}"
+    # Validate: task_n must be alphanumeric (digits + optional letters/hyphens only).
+    if [[ ! "${task_n}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+        die "checkpoint_create: invalid task_n '${task_n}' — must be alphanumeric"
+    fi
     local tag="checkpoint-task-${task_n}-pre"
 
     if git rev-parse --verify "refs/tags/${tag}" &>/dev/null; then
@@ -46,6 +50,10 @@ checkpoint_create() {
 # Usage: checkpoint_rollback <task_n>
 checkpoint_rollback() {
     local task_n="${1:?task_n required}"
+    # Validate: task_n must be alphanumeric (digits + optional letters/hyphens only).
+    if [[ ! "${task_n}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+        die "checkpoint_rollback: invalid task_n '${task_n}' — must be alphanumeric"
+    fi
     local tag="checkpoint-task-${task_n}-pre"
 
     if ! git rev-parse --verify "refs/tags/${tag}" &>/dev/null; then

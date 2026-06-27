@@ -33,11 +33,26 @@ PROTECTED_PATHS=(
 )
 export PROTECTED_PATHS
 
+# ── _is_safe_rel_path ─────────────────────────────────────────────────────────
+# Returns 0 if the relative path stays within PROJECT_ROOT (no traversal).
+_is_safe_rel_path() {
+    local rel_path="$1"
+    # Resolve the candidate path and ensure it is rooted under PROJECT_ROOT.
+    local candidate
+    candidate="$(cd "${PROJECT_ROOT}" && realpath -m "${rel_path}" 2>/dev/null || echo "")"
+    [[ -n "${candidate}" && "${candidate}" == "${PROJECT_ROOT}"/* ]]
+}
+
 # ── _is_existing_file ─────────────────────────────────────────────────────────
 # Returns 0 if the path exists as a tracked file in the git index or worktree.
 _is_existing_file() {
     local rel_path="$1"
-    [[ -f "${PROJECT_ROOT}/${rel_path}" ]] || git -C "${PROJECT_ROOT}" ls-files --error-unmatch "${rel_path}" &>/dev/null
+    # Guard: reject paths that escape PROJECT_ROOT via traversal.
+    if ! _is_safe_rel_path "${rel_path}"; then
+        return 1
+    fi
+    # Use -- to prevent rel_path values starting with '-' being parsed as flags.
+    [[ -f "${PROJECT_ROOT}/${rel_path}" ]] || git -C "${PROJECT_ROOT}" ls-files --error-unmatch -- "${rel_path}" &>/dev/null
 }
 
 # ── check_protected_paths ─────────────────────────────────────────────────────
@@ -58,6 +73,12 @@ check_protected_paths() {
     for path in "$@"; do
         # Normalize: strip leading ./
         path="${path#./}"
+
+        # ── Path traversal guard ─────────────────────────────────────────────
+        if ! _is_safe_rel_path "${path}"; then
+            violations+=("VIOLATION: path '${path}' escapes PROJECT_ROOT — rejected")
+            continue
+        fi
 
         # ── contracts/ — additive-only ──────────────────────────────────────
         if [[ "${path}" == contracts/* ]]; then
