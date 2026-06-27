@@ -253,6 +253,8 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 **Prompt context needed:** Spec §18.1 (target layout), §8.7 (Stage 0 agent chain), §17 (protected paths policy)
 
+<!-- ✅ Task 1 completed -->
+
 ---
 
 ### Task 2 — Pipeline Script Extraction
@@ -292,6 +294,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 **Files to modify / create:**
 
 - `bin/skeleton` (modify) — replace the large function body with a subcommand router:
+
   ```bash
   case "$1" in
     run)       exec "${SKELETON_ROOT}/scripts/skeleton-run.sh" "${@:2}" ;;
@@ -309,6 +312,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
   - New stubs: `status`, `cleanup`, `gates`, `merge`, `goal`, `integrate`, `autoskills`, `context`, `knowledge`, `hooks`
   - `--dir PATH` global flag parsed before subcommand dispatch; sets `PROJECT_ROOT`
   - `--no-interactive` flag: CI mode; fail if PLAN ambiguous
+
 - `scripts/run_parallel.sh` (modify) — convert to deprecation shim: print `WARN: use 'skeleton run' instead` to stderr, then `exec skeleton run "$@"` with mode flag mapping (`--mode=1` → `--parallel`, `--mode=2` → `--sequential`)
 
 **Validation:**
@@ -560,6 +564,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 - `drivers/cursor-sdk/package.json` — `{"name": "skeleton-cursor-driver", "type": "module", "dependencies": {"@cursor/sdk": "^<pinned-version>"}}` — version pinned in `router/9router-pin.json` companion field
 - `drivers/cursor-sdk/run.mjs` — `Agent.create()` wrapper:
+
   ```javascript
   import { Agent } from "@cursor/sdk";
   const agent = await Agent.create({
@@ -578,6 +583,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
   - Rate-limit errors → exit 2 (quota retry class); other errors → exit 1
   - `CURSOR_API_KEY` read from env; never log value; die if absent
   - `PROJECT_ROOT` workspace confinement enforced via `local.cwd`
+
 - Node.js version check (in `scripts/lib/config.sh`) — `driver: sdk_cursor` → verify `node --version` ≥ 22.13; die with upgrade hint if below
 
 **Validation:**
@@ -593,6 +599,8 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 ---
 
 ### Task 12 — Stage 0: Per-Task Executor + Agentic Loop L2
+
+<!-- ✅ Task 12 completed -->
 
 **Goal:** Implement the per-task execution loop (L2) that wraps the 7-step agent chain, generates `TASK_PROMPT.md` from the plan index, manages git checkpoints, and writes PLAN completion markers.
 
@@ -627,6 +635,8 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 ### Task 13 — `skeleton run` Main Orchestrator
 
+<!-- ✅ Task 13 completed -->
+
 **Goal:** Implement `scripts/skeleton-run.sh` — the full pipeline orchestrator that wires Stage −1 through Stage [6] together, with task selection, dependency validation, and scheduling mode dispatch.
 
 **Files to create:**
@@ -657,6 +667,8 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 ---
 
 ### Task 14 — Lifecycle Commands: `init`, `integrate`, `doctor`, `autoskills`
+
+<!-- ✅ Task 14 completed -->
 
 **Goal:** Implement the four core lifecycle commands that scaffold and validate projects, including the brownfield `skeleton integrate` flow (Appendix A checklist) and the `skeleton autoskills` stack-detection agent.
 
@@ -693,7 +705,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 ---
 
-### Task 15 — Hook Templates + T1/T3 Testing Infrastructure
+### Task 15 — Hook Templates + T1/T3 Testing Infrastructure <!-- ✅ Task 15 completed -->
 
 **Goal:** Create quality-gate and acceptance hook templates for all four supported stacks, implement `skeleton hooks regenerate`, and wire T1 (per-task) and T3 (post-integration) hook calls into the pipeline.
 
@@ -722,7 +734,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 ---
 
-### Task 16 — Acceptance Pipeline: `acceptance.sh` + Feedback Router (5b/5c) + Docs Sync [4]
+### Task 16 — Acceptance Pipeline: `acceptance.sh` + Feedback Router (5b/5c) + Docs Sync [4] <!-- ✅ Task 16 completed -->
 
 **Goal:** Implement Stage [5b] acceptance, Stage [5c] test-sufficiency, Stage [4] docs-sync, and the feedback router that re-routes failures back to the appropriate earlier stage.
 
@@ -754,7 +766,7 @@ Task 4 (Config split: manifest + skeleton.yaml)  Task 5 (PLAN.md parser)      �
 
 ---
 
-### Task 17 — Migration Shim + Final Integration Test + Documentation
+### Task 17 — Migration Shim + Final Integration Test + Documentation <!-- ✅ Task 17 completed -->
 
 **Goal:** Complete the `phases.yaml` → PLAN.md migration adapter, validate the full end-to-end pipeline, and update all project documentation to reflect the v1.0 architecture.
 

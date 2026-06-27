@@ -1,0 +1,75 @@
+# PLAN.md — {{PROJECT_NAME}}
+
+> **Project:** {{PROJECT_NAME}}
+> **Created:** with skeleton-parallel
+> **Status:** Ready for Implementation
+
+---
+
+## 1. Goal
+
+Describe the goal of this project and what it aims to accomplish.
+
+---
+
+## 2. Architecture Overview
+
+Describe the high-level architecture, module breakdown, and data flow.
+
+---
+
+## 3. Tech Stack
+
+List the languages, frameworks, and key dependencies.
+
+---
+
+## 4. Project Structure
+
+Show the directory layout and explain each major directory's purpose.
+
+---
+
+## 5. Implementation Tasks
+
+List the tasks to implement, their dependencies, and complexity.
+
+### Task 1 — Core Infrastructure
+
+**Goal:** Set up the core project structure and foundational modules.
+
+**Files to create:**
+
+- `app/main.*` — application entry point
+
+**Validation:**
+
+- Project compiles/runs without errors
+
+**Prompt context needed:** Architecture overview, tech stack
+
+---
+
+## 6. Task Summary
+
+| Task | Name                  | Key Files    | Depends On | Est. Complexity |
+| ---- | --------------------- | ------------ | ---------- | --------------- |
+| 1    | Core Infrastructure   | `app/main.*` | —          | Medium          |
+
+---
+
+## 7. How to Use This Plan
+
+1. Run `skeleton run --dry-run` to preview the execution plan
+2. Run `skeleton run` to start executing tasks
+3. Update this file as you discover new requirements
+
+---
+
+## 8. Deep Knowledge Reference
+
+Add domain-specific references, schemas, and algorithms here as needed.
+
+---
+
+_End of plan._

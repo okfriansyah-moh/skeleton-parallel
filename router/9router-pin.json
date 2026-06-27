@@ -1,0 +1,9 @@
+{
+  "version": "latest",
+  "npm": "@9router/server",
+  "docker": "9router/server:latest",
+  "port": 20128,
+  "health_endpoint": "http://localhost:20128/health",
+  "cursor_sdk_version": "^0.1.0",
+  "_note": "Updated only by skeleton maintainers — do not edit manually"
+}

@@ -1,449 +1,425 @@
 # Skeleton Parallel
 
-> A generic, reusable, language-agnostic development framework for building deterministic
-> pipeline systems with AI-assisted parallel development. Database-agnostic, technology-flexible,
-> and ready for any project from scratch.
+> Provider-agnostic agentic loop CLI for building deterministic pipeline systems with AI-assisted parallel development. One `docs/PLAN.md` → Copilot, Claude, Codex, Cursor — any driver, any language.
 
----
+[![License](https://img.shields.io/github/license/okfriansyah-moh/skeleton-parallel)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/okfriansyah-moh/skeleton-parallel)](https://github.com/okfriansyah-moh/skeleton-parallel/releases/latest)
 
-## What This Is
+**Topics:** `ai` · `agentic-loop` · `parallel-development` · `cli` · `github-copilot` · `claude-code` · `cursor` · `codex` · `developer-tools` · `skeleton` · `golang` · `python` · `typescript` · `bash` · `open-source`
 
-A **production-grade project skeleton** that provides:
+**Latest release:** [Download latest](https://github.com/okfriansyah-moh/skeleton-parallel/releases/latest)
 
-- **Agent-first CLI** (`skeleton`) — Lifecycle commands (`init`, `doctor`, `autoskills`, …) plus agentic execution (`run`, `merge`, …); see [CLI overview](#cli-overview) below
-- **AI-assisted development framework** — 15 agents, 28 skills, and 7 prompts loaded by GitHub Copilot on demand
-- **6 language templates** — `go`, `python`, `typescript`, `nodejs`, `rust`, `java` with modular monolith architecture built-in
-- **Intelligent upgrade system** — Detects existing mechanisms, prompts Replace/Hybrid/Skip to safely merge frameworks
-- **3-mode parallel development** — Full parallel, token-optimized, and hybrid agent execution via `run_parallel.sh`
-- **Fully autonomous pipeline** — One command runs agents → union merge → review → PR creation, end-to-end
-- **Deterministic pipeline architecture** — Same input + same config = identical output
-- **Database-agnostic design** — Choose any engine; modules never touch SQL directly
-- **Self-healing retry system** — Bounded retries with checkpoint/rollback at every stage
+skeleton-parallel lets a team define work once in `docs/PLAN.md`, then execute it autonomously through any AI provider — GitHub Copilot, Claude Code, Cursor, or OpenAI Codex — with a full six-stage validation pipeline and automatic rollback on failure.
+
+The golden rule: every task runs through the same pipeline regardless of which AI driver is active. Switch providers by changing one line in `config/skeleton.yaml`.
+
+```mermaid
+flowchart LR
+  subgraph plan["Where work is defined"]
+    P["docs/PLAN.md"]
+  end
+
+  subgraph drivers["Execution drivers"]
+    D1["router_http → 9router"]
+    D2["cli_subscription → copilot / claude / codex"]
+    D3["sdk_cursor → Cursor agent runtime"]
+  end
+
+  subgraph pipeline["Autonomous pipeline"]
+    S1["Stage −1  Knowledge sync"]
+    S2["Stage  0  7-step agent chain per task"]
+    S3["[2]–[3]  Union merge + review"]
+    S4["[5a]–[5c]  Quality + acceptance gates"]
+    S5["[6]  git push + gh pr create"]
+  end
+
+  P -->|skeleton run| S1
+  S1 --> S2
+  S2 -->|router_http| D1
+  S2 -->|cli_subscription| D2
+  S2 -->|sdk_cursor| D3
+  S2 --> S3
+  S3 --> S4
+  S4 --> S5
+```
+
+## When to use skeleton-parallel
+
+Define work in `docs/PLAN.md`. Let `skeleton run` execute it end-to-end through any AI provider.
+
+### Scenarios
+
+**1. You want to execute a PLAN with GitHub Copilot**
+
+Your team uses GitHub Copilot. Define tasks in `docs/PLAN.md`, point at the Copilot CLI driver, and run.
+
+```sh
+skeleton init go --name=my-service
+cd my-service
+# edit docs/PLAN.md with your tasks
+skeleton run --full
+```
+
+**2. You want to switch from Copilot to Claude without rewriting anything**
+
+Change one line in `config/skeleton.yaml`. The PLAN, hooks, and pipeline stages are unchanged.
+
+```sh
+# config/skeleton.yaml:
+#   execution:
+#     driver: cli_subscription
+#     cli:
+#       provider: claude   ← was: copilot
+
+skeleton run --full   # same command, different driver
+```
+
+**3. You have an existing repo and want to onboard it**
+
+Your repo already has `.github/copilot-instructions.md` and some agents. Import them into `.ai/`, install the router, regenerate hooks.
+
+```sh
+cd existing-repo
+skeleton integrate      # runs full Appendix A checklist
+skeleton doctor         # verify everything is wired
+skeleton run 1 2 3      # execute specific tasks
+```
+
+**4. You want parallel task execution across multiple AI agents**
+
+Tasks with independent file ownership run in parallel worktrees simultaneously, each with their own agent chain.
+
+```sh
+skeleton run --parallel 2 3 4    # tasks 2, 3, 4 in parallel worktrees
+skeleton run --sequential 1 2 3  # strict order, single branch
+skeleton run --full              # hybrid (default): parallel within dep batches
+```
+
+**5. You want a dry run to preview execution before committing**
+
+```sh
+skeleton run --dry-run
+skeleton run --dry-run --plan docs/PLAN.md 1 2 3
+```
+
+**6. You want CI to run with bounded retries and automatic rollback**
+
+Each task gets a git checkpoint before execution. On retry exhaustion the branch rolls back automatically.
+
+```sh
+skeleton run --full
+# On task failure:        auto-rollback to checkpoint-task-N-pre
+# On quality gate fail:   refactor cycles up to MAX_REFACTOR_CYCLES
+# On acceptance fail:     feedback router re-routes to the correct fix path
+```
+
+**7. You are starting a new project from scratch**
+
+Scaffold a language-specific project with modular monolith architecture, `.ai/` knowledge, config, and hooks on day one.
+
+```sh
+skeleton init go --name=my-service          # Go
+skeleton init python --name=my-pipeline     # Python
+skeleton init typescript --name=my-app      # TypeScript
+skeleton init java --name=my-backend        # Java
+```
+
+**8. You want to migrate from `run_parallel.sh` + `config/phases.yaml`**
+
+The old phase-based orchestrator still works via a compatibility shim. Migrate when ready.
+
+```sh
+# Still works in v1.0 (shim active for one release):
+./scripts/run_parallel.sh start --mode=3 1 2 3
+
+# New equivalent:
+skeleton run 1 2 3
+```
+
+## Installation
+
+### macOS and Linux (one-line installer)
+
+No Go or Node required:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/okfriansyah-moh/skeleton-parallel/main/install.sh | bash
+```
+
+Then add to PATH if prompted:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
+
+Verify:
+
+```sh
+skeleton version
+```
+
+### Manual install (clone + symlink)
+
+```sh
+git clone https://github.com/okfriansyah-moh/skeleton-parallel ~/.skeleton-parallel
+mkdir -p ~/.local/bin
+ln -s ~/.skeleton-parallel/bin/skeleton ~/.local/bin/skeleton
+skeleton version
+```
+
+### Update
+
+```sh
+git -C ~/.skeleton-parallel pull
+```
+
+### Windows
+
+Use WSL (recommended) and run the macOS/Linux installer inside your WSL shell.
+
+**PowerShell** (without WSL):
+
+```powershell
+git clone https://github.com/okfriansyah-moh/skeleton-parallel $env:USERPROFILE\.skeleton-parallel
+# Add $env:USERPROFILE\.skeleton-parallel\bin to your PATH
+# Invoke via: bash $env:USERPROFILE\.skeleton-parallel\bin\skeleton <cmd>
+```
 
 ## Quick Start
 
-### Option A: Using the Skeleton CLI (Recommended)
-
-```bash
-# 1. Install the framework
-git clone <this-repo>
-export PATH="$PWD/skeleton-parallel/bin:$PATH"
-
-# 2. Create a new project — spawns Copilot agent to validate structure automatically
+```sh
 skeleton init go --name=my-service
 cd my-service
 
-# 3. Verify setup (auto-fix via agent if issues found)
-skeleton doctor
+# Edit docs/PLAN.md — define your tasks
+# Configure config/skeleton.yaml — choose driver + provider
 
-# 4. Auto-install skills for your tech stack
-skeleton autoskills
-
-# 5. Generate your architecture
-@workspace Use .github/prompts/architecture.prompt.md to generate docs/architecture.md
-
-# 6. Generate your roadmap
-@workspace Use .github/prompts/roadmap.prompt.md to generate docs/implementation_roadmap.md
-
-# 7. Generate supporting specs
-@workspace Use .github/prompts/dto.prompt.md to generate docs/dto_contracts.md
-@workspace Use .github/prompts/orchestrator.prompt.md to generate docs/orchestrator_spec.md
-@workspace Use .github/prompts/db_adapter.prompt.md to generate docs/db_adapter_spec.md
-
-# 8. Generate docs/PLAN.md from your approved spec
-@workspace Follow .github/skills/plan-management/SKILL.md (create mode) to generate docs/PLAN.md from docs/specs/2026-06-27-agentic-loop-cli-design.md
-
-# 9. Execute PLAN tasks end-to-end
-@task-runner implement Task 1
-@workspace Use .github/prompts/implement-and-review-task.prompt.md with TASK_NUMBER=1
-
-# 10. Use PR remediation guidance for review cycles
-@workspace Use .github/prompts/pr-remediation.prompt.md on your current diff/PR
-
-# 11. Run development orchestrator (today: phases; planned: PLAN tasks)
-./scripts/run_parallel.sh start --mode=3 1 2 3 4   # current
-# skeleton run --full                               # v1 — see docs/specs/2026-06-27-agentic-loop-cli-design.md
+skeleton doctor      # verify setup
+skeleton run --full  # execute all pending tasks end-to-end
 ```
 
-### Option B: Manual Setup
+## Command Reference
 
-```bash
-git clone <this-repo> my-project
-cd my-project && git remote remove origin
-# Then follow steps 4–9 from Option A (prompts, Phase 0, run_parallel.sh)
+| Command                                          | Description                                              |
+| ------------------------------------------------ | -------------------------------------------------------- |
+| `skeleton init <lang> [--name=NAME] [--dir=DIR]` | Scaffold a new project from a language template          |
+| `skeleton run [tasks…] [flags]`                  | Execute PLAN.md tasks through the full pipeline          |
+| `skeleton run --dry-run`                         | Print execution plan without invoking any agents         |
+| `skeleton run --parallel`                        | One worktree per task (max speed)                        |
+| `skeleton run --sequential`                      | Strict dependency order, single branch (min cost)        |
+| `skeleton integrate [--dir=DIR]`                 | Brownfield onboarding: import legacy → .ai/ → hooks      |
+| `skeleton doctor [--dir=DIR]`                    | Validate project health; check all required tools        |
+| `skeleton autoskills [--dir=DIR]`                | Detect language and install matching skill modules       |
+| `skeleton hooks regenerate [--dir=DIR]`          | Copy hook templates for detected stack                   |
+| `skeleton upgrade [--mode=hybrid]`               | Update framework files in an existing project            |
+| `skeleton status`                                | Show pipeline state from `.skeleton-dev/run-status.json` |
+| `skeleton cleanup [--force]`                     | Remove worktrees, branches, clear state                  |
+| `skeleton version`                               | Print version                                            |
+| `skeleton help`                                  | Full usage reference                                     |
+
+### `skeleton run` flags
+
+| Flag                | Default                  | Description                                     |
+| ------------------- | ------------------------ | ----------------------------------------------- |
+| `--plan PATH`       | `manifest.defaults.plan` | Explicit PLAN.md path                           |
+| `--tasks 1,2,3`     | all pending              | Comma-separated task IDs                        |
+| `--parallel`        | —                        | Full parallel mode                              |
+| `--sequential`      | —                        | Sequential mode                                 |
+| `--driver DRIVER`   | from config              | Override execution driver                       |
+| `--dry-run`         | false                    | Preview only; no agents, no git                 |
+| `--force-deps`      | false                    | Proceed despite unsatisfied deps (logs warning) |
+| `--no-auto-merge`   | false                    | Stop after Stage 0; skip merge and PR           |
+| `--skip-acceptance` | false                    | Skip [5b] acceptance gates                      |
+| `--acceptance-only` | false                    | Run [5b]/[5c] on current branch only            |
+
+## Driver Support
+
+| Driver             | Config value               | Requires                                     | When to use                                          |
+| ------------------ | -------------------------- | -------------------------------------------- | ---------------------------------------------------- |
+| `router_http`      | `driver: router_http`      | 9router daemon                               | Multi-provider routing, OAuth combos, quota rotation |
+| `cli_subscription` | `driver: cli_subscription` | copilot / claude / codex CLI                 | Direct vendor CLI, no routing layer                  |
+| `sdk_cursor`       | `driver: sdk_cursor`       | `@cursor/sdk`, Node 22.13+, `CURSOR_API_KEY` | Cursor agent runtime                                 |
+
+```yaml
+# config/skeleton.yaml — switch provider here, nothing else changes
+execution:
+  driver: cli_subscription # router_http | cli_subscription | sdk_cursor
+  cli:
+    provider: copilot # copilot | claude | codex
 ```
 
-### Option C: Upgrade or integrate an existing repository
-
-```bash
-cd existing-project
-skeleton upgrade            # Framework files: Replace/Hybrid/Skip
-skeleton doctor
-# skeleton integrate        # v1 — import legacy → .ai/ → 9router → hooks
-```
-
-See [docs/STARTER_GUIDE.md](docs/STARTER_GUIDE.md) for the full walkthrough.
-
-## CLI overview
-
-The `skeleton` CLI has **two command families** — both maintained:
-
-| Family        | Commands                                                                        | When to use                                         |
-| ------------- | ------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **Lifecycle** | `init`, `upgrade`, `integrate`\*, `doctor`, `autoskills`, `sync`, `add`, `list` | Scaffold, validate, domain skills, knowledge sync   |
-| **Execution** | `run`_, `merge`_, `goal`_, `router`_, `plan list`\*, `status`, `cleanup`        | Run `docs/PLAN.md` tasks, agentic loop, PR pipeline |
-
-\*Planned in [agentic loop CLI spec](docs/specs/2026-06-27-agentic-loop-cli-design.md) (v1 implementation in progress). Lifecycle commands **`init`**, **`doctor`**, and **`autoskills`** work today.
-
-**Greenfield (new project):**
-
-```bash
-skeleton init go --name=my-service && cd my-service
-skeleton doctor
-skeleton autoskills
-# … docs/PLAN.md …
-skeleton run --full    # v1
-```
-
-**Brownfield (existing repo):**
-
-```bash
-skeleton integrate     # v1 — or skeleton upgrade today
-skeleton doctor && skeleton autoskills
-skeleton run 1 2 3     # v1
-```
-
-Today, parallel execution uses `./scripts/run_parallel.sh` and `config/phases.yaml`. v1 moves the work contract to **`docs/PLAN.md`** and **`skeleton run`** without removing lifecycle commands.
-
-## Repository Structure
+## Pipeline
 
 ```
-skeleton-parallel/
-├── bin/
-│   └── skeleton                   # CLI: lifecycle + execution (see docs/specs/)
-├── templates/                     # Language-specific project templates
-│   ├── common/                    # Shared files (README, .gitignore)
-│   ├── go/                        # Go vertical slice template
-│   ├── python/                    # Python modular monolith template
-│   ├── typescript/                # TypeScript template
-│   ├── nodejs/                    # Node.js (JavaScript) template
-│   ├── rust/                      # Rust template
-│   └── java/                      # Java template
-├── .github/
-│   ├── copilot-instructions.md    # Architectural constraints (always loaded)
-│   ├── prompts/                   # One-shot and execution prompts (7 files)
-│   ├── agents/                    # Autonomous execution agents (15 agents)
-│   │   ├── phase-builder          # Core: implement phases from roadmap
-│   │   ├── task-runner            # Core: implement docs/PLAN.md tasks end-to-end
-│   │   ├── dto-guardian           # Core: validate DTO contracts
-│   │   ├── integration            # Core: wire modules, detect coupling
-│   │   ├── orchestrator           # Core: build/validate pipeline
-│   │   ├── refactor               # Core: improve without behavior change
-│   │   ├── module-builder         # Core: build individual modules
-│   │   ├── conflict-resolver      # Core: resolve merge conflicts
-│   │   ├── merge-reviewer         # Core: post-merge validation
-│   │   ├── task-sync              # Core: structured task execution
-│   │   ├── scaffold               # Framework: project initialization
-│   │   ├── security-auditor       # Framework: OWASP security review
-│   │   ├── test-builder           # Framework: generate tests
-│   │   ├── upgrade-manager        # Framework: upgrade existing repos
-│   │   └── doctor                 # Framework: health check
-│   └── skills/                    # Knowledge modules (28 skills)
-│       ├── dto/                   # Core: DTO registry and validation
-│       ├── pipeline/              # Core: stage ordering/dependencies
-│       ├── modularity/            # Core: module boundary enforcement
-│       ├── determinism/           # Core: no-randomness enforcement
-│       ├── idempotency/           # Core: content-addressable IDs
-│       ├── failure/               # Core: retry, abort, degradation
-│       ├── token-optimization/    # Core: context compression
-│       ├── config-validation/     # Core: config-driven parameters
-│       ├── code-quality/          # Core: type annotations, logging
-│       ├── conflict-resolution/   # Core: git merge resolution
-│       ├── docs-sync/             # Core: documentation drift detection
-│       ├── database-portability/  # Core: engine-agnostic SQL
-│       ├── running-prompt/        # Core: structured task execution
-│       ├── security-audit/        # Framework: OWASP auditing
-│       ├── test-generation/       # Framework: test patterns/coverage
-│       ├── vertical-slice/        # Framework: feature-per-folder
-│       ├── api-design/            # Framework: REST/gRPC patterns
-│       ├── project-scaffold/      # Framework: init validation
-│       ├── dependency-analysis/   # Framework: import graph analysis
-│       ├── migration-management/  # Framework: DB migration practices
-│       ├── performance-optimization/ # Framework: profiling patterns
-│       ├── caveman/               # Token compression: ~75% fewer output tokens
-│       ├── brainstorming/         # Design-first gate before implementation
-│       ├── plan-management/         # Task decomposition into bite-sized steps
-│       ├── subagent-driven-development/ # Fresh subagent per task + 2-stage review
-│       ├── test-driven-development/ # RED-GREEN-REFACTOR cycle enforcement
-│       └── rtk/                   # Token-efficient CLI proxy (60-90% savings)
-├── docs/                          # Architecture + specs (templates)
-├── contracts/                     # Immutable DTO definitions
-├── database/                      # DB adapter + engine implementations + migrations
-├── config/                        # YAML configuration
-├── app/                           # Application code
-│   ├── main.*                     # Entry point (language-specific)
-│   ├── modules/                   # One package per pipeline stage
-│   └── orchestrator/              # Pipeline orchestration
-├── tests/                         # Unit + integration tests
-├── scripts/
-│   └── run_parallel.sh            # 3-mode parallel development orchestrator
-└── output/                        # Generated artifacts (gitignored)
-```
-
-## Architecture Principles
-
-| Principle              | Rule                                                                     |
-| ---------------------- | ------------------------------------------------------------------------ |
-| Modular monolith       | Single process, single database, no microservices                        |
-| DTO communication      | Modules communicate only through immutable DTOs in `contracts/`          |
-| Orchestrator authority | Only the orchestrator calls modules, manages state, accesses the DB      |
-| Deterministic          | Same input + same config = identical output, always                      |
-| Idempotent             | Content-addressable IDs, `ON CONFLICT DO NOTHING`                        |
-| Database-agnostic      | All DB access through `database/adapter.*` — engine chosen per project   |
-| Technology-flexible    | Forbidden-by-default tech can be overridden when the project requires it |
-| Language-agnostic      | Architectural rules don’t mandate any specific programming language      |
-
-## Parallel Development System
-
-The `run_parallel.sh` orchestrator runs multiple implementation phases simultaneously using
-autonomous AI agents, each with bounded retries and automatic rollback on failure.
-
-### Execution Modes
-
-| Mode | Name             | Speed    | Cost   | Heavy Model         | Best For                                |
-| ---- | ---------------- | -------- | ------ | ------------------- | --------------------------------------- |
-| 1    | Full Parallel    | Fastest  | High   | `claude-opus-4.6`   | Independent phases, deadline pressure   |
-| 2    | Token-Optimized  | Slowest  | Low    | `claude-sonnet-4.6` | Sequential dependencies, cost-sensitive |
-| 3    | Hybrid (default) | Balanced | Medium | `claude-sonnet-4.6` | Most development sessions               |
-
-All other phases rotate through: `sonnet-4.6 → sonnet-4.5 → gpt-5.3-codex → gpt-5.4`
-
-```bash
-./scripts/run_parallel.sh start --mode=1 2 3 4           # Full parallel (opus for heaviest)
-./scripts/run_parallel.sh start --mode=2 1 2 3           # Sequential (sonnet only)
-./scripts/run_parallel.sh start --mode=3 1 2 3 4         # Hybrid (default, sonnet for heaviest)
-./scripts/run_parallel.sh start --no-auto-merge 1 2 3    # Run agents only, skip auto-merge
-./scripts/run_parallel.sh status                         # Check progress
-./scripts/run_parallel.sh merge                          # Merge, validate, and create PR manually
-./scripts/run_parallel.sh cleanup                        # Remove worktrees and branches
-```
-
-### Fully Autonomous Pipeline
-
-A single `start` command runs the **entire pipeline** end-to-end without human intervention:
-
-```
-./scripts/run_parallel.sh start <phases>
-         │
-         ▼
-[1] Per phase/group: phase-builder → dto-guardian → integration → refactor
-         │  (bounded retries per stage; auto-rollback to checkpoint on exceed)
-         ▼
-[2] Union merge — conflict-resolver agent resolves all conflicts (5 retries)
-         │  (preserves ALL implementations from every phase)
-         ▼
-[3] Post-merge review — merge-reviewer agent
-         │  (DTO flow integrity · module boundaries · orchestrator authority)
-         ▼
-[4] Documentation sync — merge-reviewer agent  [advisory, non-blocking]
-         │
-         ▼
-[5] Global validation + orchestrator authority check
-         │  (refactor agent remediates if needed, up to 5 retries)
-         ▼
-[6] git push + gh pr create ──────────────────────────────► PR ready for review
-```
-
-The only human step is reviewing and merging the PR.
-
-To opt out of auto-merge and inspect before integrating:
-
-```bash
-./scripts/run_parallel.sh start --no-auto-merge 1 2 3
-# inspect, then:
-./scripts/run_parallel.sh merge
+skeleton run [tasks…] [flags]
+        │
+        ▼
+╔══════════════════════════════════════════════════════════╗
+║  STAGE −1  Knowledge sync (.ai/ compose-if-stale)        ║
+╚══════════════════════════════╤═══════════════════════════╝
+                               ▼
+╔══════════════════════════════════════════════════════════╗
+║  RESOLVE  plan · tasks · deps · parallel-safe file sets  ║
+╚══════════════════════════════╤═══════════════════════════╝
+                               ▼
+╔══════════════════════════════════════════════════════════╗
+║  STAGE 0  Per task / per parallel track                  ║
+║  task-runner → dto-guardian → integration →              ║
+║  security-auditor → test-builder → policy-check → T1     ║
+╚══════════════════════════════╤═══════════════════════════╝
+                               ▼
+╔══════════════════════════════════════════════════════════╗
+║  [2]  Union merge (if ≥2 parallel tracks) — 5 retries   ║
+║  [3]  Post-merge review                   — 5 retries   ║
+║  [4]  Docs sync (advisory)                — 1 attempt   ║
+║  [5a] quality-gates.sh (T3)               — 5 cycles    ║
+║  [5b] acceptance-gates.sh + LLM evaluator — 5 retries   ║
+║  [5c] test-builder sufficiency            — 5 retries   ║
+║  [6]  git push + gh pr create                           ║
+╚══════════════════════════════════════════════════════════╝
 ```
 
 ### Resilience
 
-- **Checkpoint/rollback** — Git tag before each phase; auto-rollback on failure
-- **Bounded retries** — Every stage has a max retry limit; guaranteed termination
-- **Union merge** — `conflict-resolver` agent combines all implementations; nothing is discarded
-- **Post-merge review** — `merge-reviewer` agent validates DTO flow, boundaries, and orchestrator authority
-- **Resource control** — Max 3 concurrent agents (configurable)
-- **No human intervention** — All agents run with `--no-ask-user --autopilot`
-- **Workspace confinement** — All agent prompts include an explicit constraint preventing writes to `/tmp` or paths outside the project; temporary artifacts go to `.parallel-dev/`, generated files to `output/`
+| Mechanism           | Behavior                                                                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Checkpoint/rollback | Git tag before each task; auto-rollback on retry exhaustion                                                           |
+| Bounded retries     | Every stage has a `retries.*` cap; guaranteed termination                                                             |
+| Feedback router     | [5b] failures classified: `lint_build_unit` → refactor; `missing_tests` → test-builder; `wrong_feature` → task-runner |
+| Union merge         | `conflict-resolver` agent combines all parallel track implementations; nothing discarded                              |
+| Quota retry         | Driver exit code 2 (quota/429) triggers sleep-and-retry up to `max_total_wait`                                        |
 
-### Status Display
-
-`./scripts/run_parallel.sh status` shows a live view of the full pipeline:
+## Repository Format
 
 ```
-  Branch Progress:
-    phase-2 (ingestion-scene-splitter)   2 commits   — feat(phase-2): implement ingestion
-    phase-3 (processing)                 running     — (no commits yet)
-
-  Agent Status:
-    Phase/Group                  State       Model               Exit  Updated
-    ──────────────────────────── ─────────── ─────────────────── ───── ────────────────────
-    phase-2 (ingestion...)       complete    claude-opus-4.6     0     2026-03-24T10:30:00Z
-    phase-3 (processing)         running     claude-sonnet-4.5   —     2026-03-24T10:15:00Z
-    ─────────────── Post-Phase Pipeline ─────────────────────────────────────────────────
-    post-merge-review            complete    claude-sonnet-4.6   0     2026-03-24T10:35:00Z
-    docs-sync                    advisory_failed  claude-sonnet-4.5  1  2026-03-24T10:36:00Z
-    global-validation            complete    N/A                 0     2026-03-24T10:37:00Z
-
-  Log files:
-    phase-2-phase-builder-1.log -> /path (12,345 bytes)
-    post-merge-review-1.log     -> /path (8,901 bytes)
+docs/PLAN.md                 task definitions, dep graph, file ownership, validation criteria
+.ai/                         canonical AI knowledge (instructions, agents, skills, prompts)
+config/skeleton.yaml         runtime config (driver, retries, acceptance, hooks)
+scripts/hooks/
+  quality-gates.sh           T1 + T3 quality gate hook (language-specific)
+  acceptance-gates.sh        [5b] acceptance gate hook (project-specific E2E)
+.skeleton-dev/
+  plan-index.json            parsed task index
+  run-status.json            per-stage pipeline state
+  events.jsonl               structured observability log
+  logs/                      per-agent log files
 ```
 
-Phase/group rows and post-phase pipeline stages (`post-merge-review`, `docs-sync`, `global-validation`, `remediation`) are tracked separately in `.parallel-dev/phase-status.json`.
+## Prerequisites
+
+| Tool                           | Required For                     | Install                                                |
+| ------------------------------ | -------------------------------- | ------------------------------------------------------ |
+| `bash 4+`                      | All shell scripts                | `brew install bash`                                    |
+| `git 2.5+`                     | Checkpoints, worktrees, PR       | `brew install git`                                     |
+| `python3 3.10+`                | plan_parser.py, detect_legacy.py | `brew install python`                                  |
+| `ars` (ARES CLI)               | Stage −1 knowledge sync          | [install ars](https://github.com/okfriansyah-moh/ares) |
+| `9router`                      | `driver: router_http`            | `npm install -g @9router/server`                       |
+| `copilot` / `claude` / `codex` | `driver: cli_subscription`       | vendor-specific                                        |
+| `node 22.13+`                  | `driver: sdk_cursor`             | `brew install node`                                    |
+| `gh`                           | Stage [6] PR creation            | `brew install gh && gh auth login`                     |
+
+## Migration from `run_parallel.sh`
+
+`scripts/run_parallel.sh` is a **compatibility shim** in v1.0. It prints a deprecation warning and forwards to `skeleton run`. It will be removed in v2.0.
+
+| Legacy                                    | v1.0 equivalent                                           |
+| ----------------------------------------- | --------------------------------------------------------- |
+| `run_parallel.sh start --mode=1 [phases]` | `skeleton run --parallel [tasks]`                         |
+| `run_parallel.sh start --mode=2 [phases]` | `skeleton run --sequential [tasks]`                       |
+| `run_parallel.sh start --mode=3 [phases]` | `skeleton run [tasks]` (hybrid default)                   |
+| `run_parallel.sh status`                  | `skeleton status`                                         |
+| `run_parallel.sh merge`                   | `skeleton merge`                                          |
+| `run_parallel.sh cleanup`                 | `skeleton cleanup`                                        |
+| `config/phases.yaml`                      | `docs/PLAN.md` (tasks + dep graph)                        |
+| `MODEL_HEAVY` env                         | `router.combos.heavy` in `config/skeleton.yaml`           |
+| `COPILOT_MODEL` env                       | `execution.cli.model` in `config/skeleton.yaml`           |
+| `MAX_PARALLEL_AGENTS` env                 | `execution.max_parallel_agents` in `config/skeleton.yaml` |
+
+See [docs/PARALLEL_DEV.md §11](docs/PARALLEL_DEV.md) for the full migration guide.
+
+## Language Templates
+
+`skeleton init <lang>` scaffolds a project with modular monolith architecture, `.ai/` knowledge, config, and hooks.
+
+| Language     | Template                | Architecture                                         |
+| ------------ | ----------------------- | ---------------------------------------------------- |
+| `go`         | `templates/go/`         | Vertical slice, `internal/modules/`, health endpoint |
+| `python`     | `templates/python/`     | Modular monolith, `app/modules/`, pyproject.toml     |
+| `typescript` | `templates/typescript/` | ESM, `src/modules/`, vitest                          |
+| `nodejs`     | `templates/nodejs/`     | CommonJS, `src/modules/`, jest                       |
+| `rust`       | `templates/rust/`       | Workspace, `src/modules/`                            |
+| `java`       | `templates/java/`       | Maven, `src/main/java/com/app/`                      |
 
 ## Agent System
 
-### All Agents
+### Core Pipeline Agents (15)
 
-| Agent | Purpose |
-| ----- | ------- |
-
-### Agents (15)
-
-`.github/agents/<name>.md` — invoked as `@<name>` in GitHub Copilot chat.
-
-#### Core Pipeline Agents
-
-| Agent             | Purpose                                           |
-| ----------------- | ------------------------------------------------- |
-| phase-builder     | Implement any phase from the roadmap              |
-| task-runner       | Implement one task from `docs/PLAN.md` end-to-end |
-| dto-guardian      | Validate DTO contracts in `contracts/`            |
-| integration       | Wire modules together, detect coupling            |
-| orchestrator      | Build and validate the pipeline orchestrator      |
-| refactor          | Improve code structure without behavior change    |
-| module-builder    | Build individual pipeline modules from specs      |
-| conflict-resolver | Resolve Git merge conflicts (union strategy)      |
-| merge-reviewer    | Post-merge validation and quality review          |
-| task-sync         | Structured task execution workflow                |
-
-#### Framework Agents
-
-| Agent            | Purpose                                                        |
-| ---------------- | -------------------------------------------------------------- |
-| scaffold         | Init projects, generate boilerplate, validate structure        |
-| security-auditor | OWASP-aware security assessment with severity ratings          |
-| test-builder     | Generate unit/integration tests, enforce coverage              |
-| upgrade-manager  | Upgrade repos to skeleton-parallel; install scripts and skills |
-| doctor           | Project health check; validate skills, agents, config          |
-
-### PLAN Execution Prompts
-
-| Prompt                                                | Purpose                                                              |
-| ----------------------------------------------------- | -------------------------------------------------------------------- |
-| `.github/prompts/implement-and-review-task.prompt.md` | Execute one PLAN task with implementation + self-review + validation |
-| `.github/prompts/pr-remediation.prompt.md`            | Generate concise remediation actions from PR/diff findings           |
+| Agent               | Stage              | Purpose                                      |
+| ------------------- | ------------------ | -------------------------------------------- |
+| `task-runner`       | Stage 0 step 1     | Implement one PLAN.md task end-to-end        |
+| `dto-guardian`      | Stage 0 step 2     | Validate DTO contracts in `contracts/`       |
+| `integration`       | Stage 0 step 3     | Wire modules, detect coupling violations     |
+| `security-auditor`  | Stage 0 step 4     | OWASP-aware security assessment              |
+| `test-builder`      | Stage 0 step 5     | Generate unit/integration tests              |
+| `conflict-resolver` | Stage [2]          | Resolve merge conflicts (union strategy)     |
+| `merge-reviewer`    | Stage [3]/[4]      | Post-merge DTO flow + boundary validation    |
+| `refactor`          | [5a] remediation   | Fix quality gate violations                  |
+| `phase-builder`     | legacy             | Implement phases from implementation roadmap |
+| `orchestrator`      | review             | Build and validate pipeline orchestrator     |
+| `module-builder`    | build              | Build individual pipeline modules            |
+| `scaffold`          | `skeleton init`    | Validate project structure post-init         |
+| `upgrade-manager`   | `skeleton upgrade` | Upgrade repos to skeleton-parallel           |
+| `doctor`            | `skeleton doctor`  | Project health check                         |
+| `task-sync`         | general            | Structured task execution workflow           |
 
 ### Skills (28)
 
-Folder-based knowledge modules at `.github/skills/<name>/SKILL.md` — loaded on-demand by agents to minimize token usage while maintaining constraint enforcement.
+`.github/skills/<name>/SKILL.md` — loaded on-demand to minimize token usage.
 
-#### Core Pipeline Skills
+**Always-active:**
 
-| Skill                | Purpose                                    |
-| -------------------- | ------------------------------------------ |
-| dto                  | DTO registry, validation, anti-patterns    |
-| pipeline             | Stage ordering, DTO flow, parallelism      |
-| modularity           | Module boundaries, import rules            |
-| determinism          | No-randomness enforcement                  |
-| idempotency          | Content-addressable IDs, ON CONFLICT       |
-| failure              | Retry policies, degradation, thresholds    |
-| token-optimization   | Context compression, progressive loading   |
-| config-validation    | Config-driven parameters, YAML enforcement |
-| code-quality         | Type annotations, logging, code standards  |
-| coding-standards     | Naming, function design, language idioms   |
-| conflict-resolution  | Git merge conflict resolution              |
-| docs-sync            | Documentation drift detection              |
-| database-portability | Engine-agnostic SQL, adapter patterns      |
-| running-prompt       | Structured task execution workflow         |
+| Skill                         | Purpose                                     |
+| ----------------------------- | ------------------------------------------- |
+| `caveman`                     | Compress output ~75% when requested         |
+| `brainstorming`               | Design-first gate before any implementation |
+| `plan-management`             | Break work into 2–5 min tasks               |
+| `subagent-driven-development` | Fresh subagent per task + 2-stage review    |
+| `test-driven-development`     | RED-GREEN-REFACTOR cycle                    |
+| `rtk`                         | Token-efficient CLI proxy (60–90% savings)  |
 
-#### Framework Skills
+**Domain skills (loaded per agent/task):**
+`dto` · `pipeline` · `modularity` · `determinism` · `idempotency` · `failure` · `config-validation` · `code-quality` · `coding-standards` · `conflict-resolution` · `docs-sync` · `database-portability` · `running-prompt` · `security-audit` · `test-generation` · `vertical-slice` · `api-design` · `project-scaffold` · `dependency-analysis` · `migration-management` · `performance-optimization` · `token-optimization`
 
-| Skill                    | Purpose                                       |
-| ------------------------ | --------------------------------------------- |
-| security-audit           | OWASP vulnerability detection and remediation |
-| test-generation          | Test patterns, coverage, AAA structure        |
-| vertical-slice           | Feature-per-folder architecture enforcement   |
-| api-design               | REST/gRPC endpoint and contract patterns      |
-| project-scaffold         | Project initialization validation             |
-| dependency-analysis      | Import graph and coupling analysis            |
-| migration-management     | Database migration best practices             |
-| performance-optimization | Profiling and throughput improvement          |
+## Architecture Principles
 
-#### Always-Active Skills (Superpowers)
-
-| Skill                       | Always On | Purpose                                                   |
-| --------------------------- | --------- | --------------------------------------------------------- |
-| caveman                     | ✅        | Compress output ~75% on demand — no filler, full accuracy |
-| brainstorming               | ✅        | Design-first gate — never write code without a spec       |
-| plan-management             | ✅        | Break work into 2-5 min tasks before implementing         |
-| subagent-driven-development | ✅        | Fresh subagent per task with 2-stage quality review       |
-| test-driven-development     | ✅        | RED-GREEN-REFACTOR — no production code without a test    |
-| rtk                         | ✅        | Token-efficient CLI proxy (60-90% output savings)         |
-
-## Skeleton CLI (v1.1.0)
-
-The `skeleton` CLI is **agent-first** — every file-modifying command spawns a Copilot CLI agent that validates, auto-fixes, and commits the result. Human approval is not required.
-
-### Key Capabilities
-
-| Feature                  | Description                                                                 |
-| ------------------------ | --------------------------------------------------------------------------- |
-| **Agent spawning**       | Every command invokes a Copilot agent to validate the output automatically  |
-| **Replace/Hybrid/Skip**  | `skeleton upgrade` detects existing mechanisms and prompts upgrade strategy |
-| `--no-agent`             | Skip agent invocation for one-off commands or offline use                   |
-| `COPILOT_MODEL`          | Choose any model: `export COPILOT_MODEL=claude-sonnet-4.6`                  |
-| `SKIP_AGENT=true`        | Globally disable agent spawning across all commands                         |
-| **Tech-stack detection** | `skeleton autoskills` reads config/src files and installs matching skills   |
-| **Idempotent upgrades**  | Re-running `skeleton upgrade` on an already-upgraded repo is safe           |
-
-### Upgrade Modes
-
-| Mode      | Behavior                                                           |
-| --------- | ------------------------------------------------------------------ |
-| `replace` | Full replacement: overwrites all framework files unconditionally   |
-| `hybrid`  | Additive merge: adds missing files, preserves customized ones      |
-| `skip`    | Validation only: reports what's missing without making any changes |
-
-```bash
-skeleton upgrade               # interactive mode — prompts for Replace/Hybrid/Skip
-skeleton upgrade --mode=hybrid # force hybrid (safe for existing custom configs)
-skeleton init typescript --no-agent  # skip agent validation this time
-```
+| Principle              | Rule                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| Modular monolith       | Single process, single database, no microservices                            |
+| DTO communication      | Modules communicate only through immutable DTOs in `contracts/`              |
+| Orchestrator authority | Only the orchestrator calls modules, manages state, accesses the DB          |
+| Deterministic          | Same input + same config = identical output, always                          |
+| Idempotent             | Content-addressable IDs, `ON CONFLICT DO NOTHING`                            |
+| Database-agnostic      | All DB access through `database/adapter.*` — engine chosen per project       |
+| Provider-agnostic      | Changing `execution.driver` is the only change needed to switch AI providers |
+| Language-agnostic      | Architectural rules apply regardless of programming language                 |
 
 ## Documentation
 
-| Document                                                                                             | Purpose                             |
-| ---------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| [docs/specs/2026-06-27-agentic-loop-cli-design.md](docs/specs/2026-06-27-agentic-loop-cli-design.md) | Agentic loop CLI design (v1 target) |
-| [docs/STARTER_GUIDE.md](docs/STARTER_GUIDE.md)                                                       | How to use this framework           |
-| [docs/PARALLEL_DEV.md](docs/PARALLEL_DEV.md)                                                         | Parallel development guide          |
-| [docs/AGENTS_AND_SKILLS.md](docs/AGENTS_AND_SKILLS.md)                                               | Agent/skill system reference        |
-| [docs/architecture.md](docs/architecture.md)                                                         | Architecture template               |
-| [docs/implementation_roadmap.md](docs/implementation_roadmap.md)                                     | Roadmap template                    |
-| [docs/orchestrator_spec.md](docs/orchestrator_spec.md)                                               | Orchestrator spec template          |
-| [docs/dto_contracts.md](docs/dto_contracts.md)                                                       | DTO contracts template              |
-| [docs/db_adapter_spec.md](docs/db_adapter_spec.md)                                                   | Database adapter spec template      |
-| [docs/PROGRESS_REPORT.md](docs/PROGRESS_REPORT.md)                                                   | Progress tracking template          |
+| Document                                                                                             | Purpose                                                       |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [docs/specs/2026-06-27-agentic-loop-cli-design.md](docs/specs/2026-06-27-agentic-loop-cli-design.md) | v1.0 agentic loop CLI full specification                      |
+| [docs/PARALLEL_DEV.md](docs/PARALLEL_DEV.md)                                                         | Parallel development guide + migration from `run_parallel.sh` |
+| [docs/STARTER_GUIDE.md](docs/STARTER_GUIDE.md)                                                       | Step-by-step getting started walkthrough                      |
+| [docs/AGENTS_AND_SKILLS.md](docs/AGENTS_AND_SKILLS.md)                                               | Agent and skill system reference                              |
+| [docs/architecture.md](docs/architecture.md)                                                         | Architecture template                                         |
+| [docs/implementation_roadmap.md](docs/implementation_roadmap.md)                                     | Roadmap template                                              |
+| [docs/orchestrator_spec.md](docs/orchestrator_spec.md)                                               | Orchestrator spec template                                    |
+| [docs/dto_contracts.md](docs/dto_contracts.md)                                                       | DTO contracts template                                        |
+| [docs/db_adapter_spec.md](docs/db_adapter_spec.md)                                                   | Database adapter spec template                                |
 
-## Requirements
+## Contributing
 
-- **Bash 4+** — Required for `run_parallel.sh` (macOS ships 3.2; install via `brew install bash`)
-- **Git 2.5+** — Worktree support for parallel development
-- **Python 3** — YAML config parser and validation checks
-- **VS Code + GitHub Copilot** — Agent and skill system
-- **Copilot CLI** — Required for agent spawning in `skeleton` commands (`--no-agent` to bypass)
-- **GitHub CLI (`gh`)** — PR creation (auto-installed if absent; run `gh auth login` once)
-- (Optional) Language-specific lint/test tools — place in `scripts/hooks/quality-gates.sh`
+Read [docs/specs/2026-06-27-agentic-loop-cli-design.md](docs/specs/2026-06-27-agentic-loop-cli-design.md) and [docs/PLAN.md](docs/PLAN.md) before changing behavior. Keep `docs/PLAN.md` as the canonical work contract and `.ai/` as the canonical knowledge source.
 
 ## License
 

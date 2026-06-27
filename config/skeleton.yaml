@@ -1,0 +1,50 @@
+# config/skeleton.yaml — Runtime configuration for skeleton-parallel (this repo)
+# ─────────────────────────────────────────────────────────────────────────────
+# This is the runtime config for skeleton-parallel's own development.
+# Projects that use skeleton-parallel copy skeleton.yaml.template and fill it in.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1"
+
+execution:
+  driver: cli_subscription
+  cli:
+    provider: copilot
+    model: claude-sonnet-4.6
+  mode: hybrid
+  max_parallel_agents: 3
+
+router:
+  enabled: false
+  auto_start: false
+  endpoint: "http://localhost:20128/v1"
+  inject: false
+  quota_retry:
+    enabled: false
+
+retries:
+  task_runner: 5
+  dto_guardian: 5
+  integration: 5
+  security_auditor: 3
+  test_builder: 3
+  refactor: 3
+  merge: 5
+  global_validation: 5
+  acceptance: 5
+
+acceptance:
+  llm_evaluator: false
+  skip: false
+  max_retries: 5
+
+testing:
+  t2_enabled: false
+  strict_deps: true
+
+hooks:
+  quality: scripts/hooks/quality-gates.sh
+  acceptance: scripts/hooks/acceptance-gates.sh
+
+logging:
+  dir: .skeleton-dev/logs

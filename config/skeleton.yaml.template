@@ -1,0 +1,103 @@
+# config/skeleton.yaml — Runtime configuration for skeleton-parallel
+# ─────────────────────────────────────────────────────────────────────────────
+# RUNTIME ONLY: This file controls HOW the pipeline runs.
+# Identity fields (project name, domain, provider, plan path, skills.always)
+# belong in .ai/manifest.yaml, NOT here.
+#
+# Copy this file to your project as config/skeleton.yaml and fill in the values.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1"
+
+# ── Execution ─────────────────────────────────────────────────────────────────
+execution:
+  # Which driver to use for agent invocation.
+  # VALID VALUES: router_http | cli_subscription | sdk_cursor
+  # INVALID:      cli_subscription + cli.provider: cursor → use sdk_cursor instead
+  driver: cli_subscription
+
+  # Settings for the cli_subscription driver (copilot / claude / codex CLIs)
+  cli:
+    provider: copilot    # copilot | claude | codex  (NOT cursor — use sdk_cursor for Cursor)
+    model: claude-sonnet-4.6  # Model/combo alias passed to the CLI --model flag
+
+  # Settings for the sdk_cursor driver (requires Node.js ≥ 22.13)
+  cursor:
+    runtime: local        # local | cloud
+    model: composer-2.5   # Cursor model identifier
+
+  # Scheduling mode for plan execution
+  mode: hybrid            # hybrid (default) | parallel | sequential
+
+  # Maximum number of agent processes running simultaneously (parallel/hybrid mode)
+  max_parallel_agents: 3
+
+# ── Router (9router daemon) ───────────────────────────────────────────────────
+router:
+  # 9router driver type
+  driver: nine_router     # nine_router | openai_compatible | mock
+
+  # Whether 9router is enabled for this project
+  enabled: true
+
+  # Auto-start the 9router daemon if not running when driver=router_http
+  auto_start: true
+
+  # 9router API endpoint (OpenAI-compatible)
+  endpoint: "http://localhost:20128/v1"
+
+  # Combo alias to use for routing (configured in 9router dashboard)
+  combo: project-default
+
+  # Inject 9router env vars into CLI driver invocations when driver=cli_subscription
+  inject: true
+
+  # Quota exhaustion retry policy
+  quota_retry:
+    enabled: true
+    interval: 1h          # How long to sleep before retrying after quota exhaustion
+    max_total_wait: 24h   # Maximum cumulative wait before failing the run
+    on_exhausted: sleep_and_retry  # sleep_and_retry | fail_immediately
+
+# ── Per-agent retry limits ────────────────────────────────────────────────────
+# Maximum number of retries before rolling back to checkpoint.
+retries:
+  task_runner: 5
+  dto_guardian: 5
+  integration: 5
+  security_auditor: 3
+  test_builder: 3
+  refactor: 3
+  merge: 5
+  global_validation: 5
+  acceptance: 5
+
+# ── Acceptance gates ──────────────────────────────────────────────────────────
+acceptance:
+  # Enable optional LLM-based evaluation in Stage [5b]
+  # (intentionally non-deterministic — does not affect orchestration determinism)
+  llm_evaluator: true
+
+  # Skip acceptance gates entirely (useful for rapid iteration)
+  skip: false
+
+  # Maximum acceptance+feedback cycles before marking run FAILED
+  max_retries: 5
+
+# ── Testing strategy ──────────────────────────────────────────────────────────
+testing:
+  # Enable T2 optional smoke tests on changed files after Stage 0 batch
+  t2_enabled: false
+
+  # Enforce strict dep ordering (fail if a depended-on task is incomplete)
+  strict_deps: true
+
+# ── Hook paths ────────────────────────────────────────────────────────────────
+# Paths are relative to PROJECT_ROOT.
+hooks:
+  quality:    scripts/hooks/quality-gates.sh
+  acceptance: scripts/hooks/acceptance-gates.sh
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  dir: .skeleton-dev/logs

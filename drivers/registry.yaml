@@ -1,0 +1,20 @@
+# drivers/registry.yaml — Execution driver registry for skeleton-parallel
+# ─────────────────────────────────────────────────────────────────────────────
+# Maps driver names to their entrypoint scripts, relative to SKELETON_ROOT.
+# Used by task_executor.sh (Task 12) to dispatch to the correct driver.
+#
+# Driver selection rules (per §8.12):
+#   router_http       — HTTP harness calls 9router /v1/chat/completions
+#   cli_copilot       — Copilot CLI subscription (non-interactive)
+#   cli_claude        — Claude Code CLI subscription (non-interactive)
+#   cli_codex         — Codex/OpenAI CLI subscription (non-interactive)
+#   sdk_cursor        — Cursor SDK (@cursor/sdk) local runtime
+#
+# INVALID: cli_subscription + cli.provider: cursor → use sdk_cursor instead
+# ─────────────────────────────────────────────────────────────────────────────
+
+router_http: drivers/router_http/run.sh
+cli_copilot: drivers/cli/copilot.sh
+cli_claude: drivers/cli/claude.sh
+cli_codex: drivers/cli/codex.sh
+sdk_cursor: drivers/cursor-sdk/run.mjs

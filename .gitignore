@@ -172,6 +172,10 @@ cython_debug/
 # Skeleton Parallel — project-specific
 # ─────────────────────────────────────────────────────────────
 
+# Un-ignore scripts/lib/ (overrides the Python `lib/` blanket rule above)
+!scripts/lib/
+!scripts/lib/**
+
 # Pipeline output
 output/
 
@@ -179,6 +183,9 @@ output/
 *.db
 *.sqlite
 *.sqlite3
+
+# Runtime state (append-only logs, per-run status — never commit)
+.skeleton-dev/
 
 # Parallel development state
 .parallel-dev/
