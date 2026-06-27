@@ -3,38 +3,64 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  package:
+    name: Package
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Package release tarball
+      - name: Build archive
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          ARCHIVE="skeleton-parallel-${VERSION}.tar.gz"
+          mkdir -p dist
 
-          tar -czf "${ARCHIVE}" \
+          tar -czf "dist/skeleton-parallel-${VERSION}.tar.gz" \
             --exclude='.git' \
             --exclude='.skeleton-dev' \
+            --exclude='dist' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
-            .
+            -C "$(pwd)" .
 
-          echo "ARCHIVE=${ARCHIVE}" >> "${GITHUB_ENV}"
-          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          sha256sum "dist/skeleton-parallel-${VERSION}.tar.gz" \
+            | awk '{print $1}' \
+            > "dist/skeleton-parallel-${VERSION}.tar.gz.sha256"
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+      - name: Verify archive
+        run: |
+          tar -tzf dist/skeleton-parallel-*.tar.gz | grep -q "bin/skeleton" \
+            && echo "bin/skeleton present" || { echo "MISSING bin/skeleton"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: "skeleton-parallel ${{ env.VERSION }}"
+          name: release-assets
+          path: dist/
+
+  release:
+    name: Create GitHub Release
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist/
+
+      - name: List release assets
+        run: ls -lh dist/
+
+      - uses: softprops/action-gh-release@v2
+        with:
           generate_release_notes: true
-          files: ${{ env.ARCHIVE }}
+          fail_on_unmatched_files: true
+          files: dist/*
