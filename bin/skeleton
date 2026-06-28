@@ -1924,13 +1924,14 @@ cmd_doctor() {
             log_ok "${label}"
         elif [[ "${severity}" == "warn" ]]; then
             log_warn "${label} — MISSING (optional)"
-            ((warnings++))
+            (( ++warnings ))
         elif [[ "${severity}" == "info" ]]; then
             log_info "${label} — not present"
         else
             log_error "${label} — MISSING"
-            ((issues++))
+            (( ++issues ))
         fi
+        return 0
     }
 
     # ── Section 1: Identity & Runtime Config ──────────────────────────────
@@ -1940,7 +1941,7 @@ cmd_doctor() {
         log_ok ".ai/manifest.yaml"
     else
         log_error ".ai/manifest.yaml — MISSING (run: ars init  or  skeleton integrate)"
-        (( issues++ ))
+        (( ++issues ))
     fi
 
     if [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
@@ -1950,18 +1951,18 @@ cmd_doctor() {
             log_ok "config/skeleton.yaml"
         else
             log_error "config/skeleton.yaml — present but not loadable (run: skeleton integrate)"
-            (( issues++ ))
+            (( ++issues ))
         fi
     else
         log_error "config/skeleton.yaml — MISSING (run: skeleton integrate)"
-        (( issues++ ))
+        (( ++issues ))
     fi
 
     if [[ -f "${target_dir}/docs/PLAN.md" ]]; then
         log_ok "docs/PLAN.md"
     else
         log_error "docs/PLAN.md — MISSING (canonical work source)"
-        (( issues++ ))
+        (( ++issues ))
     fi
 
     # ── Section 2: Agentic Knowledge Plane ────────────────────────────────
@@ -1986,17 +1987,17 @@ cmd_doctor() {
         log_ok "Agents directory: ${agents_dir#${target_dir}/}"
     else
         log_error "No agents directory found (expected .ai/agents/ or .github/agents/)"
-        (( issues++ ))
+        (( ++issues ))
     fi
     if [[ -n "${skills_dir}" ]]; then
         log_ok "Skills directory: ${skills_dir#${target_dir}/}"
     else
         log_error "No skills directory found (expected .ai/skills/ or .github/skills/)"
-        (( issues++ ))
+        (( ++issues ))
     fi
     if [[ "${knowledge_source}" == ".github" ]]; then
         log_warn "Skills/agents live in .github/ (legacy) — run: ars compose to migrate to .ai/"
-        (( warnings++ ))
+        (( ++warnings ))
     fi
     _check_exists ".github/prompts" ".github/prompts/ (prompts directory)" "warn"
 
@@ -2041,7 +2042,7 @@ cmd_doctor() {
                 log_ok "copilot CLI found: $(command -v copilot)"
             else
                 log_warn "copilot CLI — not found (optional; needed for driver=cli_subscription)"
-                (( warnings++ ))
+                (( ++warnings ))
             fi
             ;;
         claude)
@@ -2050,7 +2051,7 @@ cmd_doctor() {
                 log_ok "claude CLI found: $(command -v claude)"
             else
                 log_warn "claude CLI — not found"
-                (( warnings++ ))
+                (( ++warnings ))
             fi
             ;;
         codex)
@@ -2059,7 +2060,7 @@ cmd_doctor() {
                 log_ok "codex CLI found: $(command -v codex)"
             else
                 log_warn "codex CLI — not found"
-                (( warnings++ ))
+                (( ++warnings ))
             fi
             ;;
         cursor)
@@ -2079,7 +2080,7 @@ cmd_doctor() {
                 log_ok "Node.js $(node --version 2>/dev/null) (required for router_http / 9router)"
             else
                 log_warn "Node.js — not found (needed for driver=router_http)"
-                (( warnings++ ))
+                (( ++warnings ))
             fi
             ;;
         sdk_cursor)
@@ -2090,15 +2091,15 @@ cmd_doctor() {
                     log_ok "Node.js v${_nv} (≥22.13 satisfied for sdk_cursor)"
                 else
                     log_error "Node.js v${_nv} — need ≥22.13 for driver=sdk_cursor"
-                    (( issues++ ))
+                    (( ++issues ))
                 fi
             else
                 log_error "Node.js — NOT FOUND (required for driver=sdk_cursor)"
-                (( issues++ ))
+                (( ++issues ))
             fi
             if [[ -z "${CURSOR_API_KEY:-}" ]]; then
                 log_error "CURSOR_API_KEY — not set (required for driver=sdk_cursor)"
-                (( issues++ ))
+                (( ++issues ))
             else
                 log_ok "CURSOR_API_KEY set"
             fi
@@ -2112,7 +2113,7 @@ cmd_doctor() {
         log_ok "ars CLI found: $(command -v ars)"
     else
         log_warn "ars CLI — not found (install: https://github.com/okfriansyah-moh/ares)"
-        (( warnings++ ))
+        (( ++warnings ))
     fi
 
     # ── Section 6: Skills & Agents Inventory ──────────────────────────────
@@ -2146,7 +2147,7 @@ cmd_doctor() {
     log_ok "Skills present: ${skill_count}/${#core_skills[@]}"
     if [[ ${#missing_skills[@]} -gt 0 ]]; then
         log_warn "Missing skills: ${missing_skills[*]}"
-        ((warnings++))
+        (( ++warnings ))
     fi
 
     echo ""
@@ -2175,7 +2176,7 @@ cmd_doctor() {
     log_ok "Agents present: ${agent_count}/${#core_agents[@]}"
     if [[ ${#missing_agents[@]} -gt 0 ]]; then
         log_warn "Missing agents: ${missing_agents[*]}"
-        ((warnings++))
+        (( ++warnings ))
     fi
 
     # ── Section 7: Project Structure ──────────────────────────────────────
@@ -2188,7 +2189,7 @@ cmd_doctor() {
         _check_lang_structure "${detected_lang}" "${target_dir}"
     else
         log_warn "Could not detect project language"
-        ((warnings++))
+        (( ++warnings ))
     fi
 
     # ── Section 8: Doc Templates ───────────────────────────────────────────
@@ -2207,7 +2208,7 @@ cmd_doctor() {
         log_ok "Git repository initialized"
     else
         log_warn "Not a Git repository"
-        ((warnings++))
+        (( ++warnings ))
     fi
 
     # ── Summary ───────────────────────────────────────────────────────────
