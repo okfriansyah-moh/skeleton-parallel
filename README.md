@@ -73,6 +73,11 @@ cp ~/Downloads/idx-signal-plan.md idx-signals-systems/docs/plan.md
 # ── Phase 2: Scaffold + wire skeleton ────────────────────────────────────────
 cd idx-signals-systems
 
+# Step 0 — verify provider auth before any agent spawning
+skeleton auth --provider=claude        # or copilot | codex | router_http
+# → checks CLI binary is installed and authenticated
+# → exits with clear install/auth instructions if not ready
+
 # Scaffold the Python backend (additive — won't touch docs/ or existing dirs)
 skeleton init python --role=backend --root=backend/ --name=idx-signals-system
 skeleton init python --role=mcp-server --root=mcp-server/ --name=idx-signals-mcp

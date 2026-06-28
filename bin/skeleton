@@ -2983,6 +2983,143 @@ _autoskills_merge_skill() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: auth
+# ═════════════════════════════════════════════════════════════════════════════
+# Pre-flight check: verify the configured AI provider CLI is installed and
+# authenticated before running skeleton init, run, or any agent-spawning command.
+#
+# Usage: skeleton auth [--dir=DIR] [--provider=PROVIDER]
+#
+# If --provider is omitted, reads provider from config/skeleton.yaml in DIR.
+# ═════════════════════════════════════════════════════════════════════════════
+cmd_auth() {
+    local _dir="." _provider=""
+
+    for arg in "$@"; do
+        case "${arg}" in
+            --dir=*)      _dir="${arg#--dir=}" ;;
+            --provider=*) _provider="${arg#--provider=}" ;;
+            -h|--help)
+                echo "Usage: skeleton auth [--dir=DIR] [--provider=PROVIDER]"
+                echo ""
+                echo "Verify agent provider auth before running skeleton commands."
+                echo "If no --provider, reads config/skeleton.yaml in DIR."
+                echo ""
+                echo "Providers: claude | copilot | codex | router_http"
+                return 0 ;;
+        esac
+    done
+
+    [[ -z "${_provider}" ]] && _provider="$(_detect_provider_for_dir "${_dir}")"
+
+    log_info "Auth check — provider: ${BOLD}${_provider}${NC}"
+    echo ""
+
+    local _ok=true
+
+    case "${_provider}" in
+        claude)
+            if ! command -v claude &>/dev/null; then
+                log_error "claude CLI not found."
+                echo ""
+                echo "  Install Claude Code:"
+                echo "    https://claude.ai/code"
+                echo "    or: npm install -g @anthropic-ai/claude-code"
+                _ok=false
+            else
+                log_ok "claude CLI: $(command -v claude)"
+                if claude auth status &>/dev/null 2>&1; then
+                    log_ok "claude: authenticated"
+                else
+                    log_warn "claude: not authenticated (or check not supported by this version)"
+                    echo ""
+                    echo "  Run: claude auth login"
+                fi
+            fi
+            ;;
+        copilot)
+            if ! command -v copilot &>/dev/null; then
+                log_error "copilot CLI not found."
+                echo ""
+                echo "  Install GitHub Copilot CLI:"
+                echo "    npm install -g @githubnext/github-copilot-cli"
+                echo "    or: gh extension install github/gh-copilot"
+                _ok=false
+            else
+                log_ok "copilot CLI: $(command -v copilot)"
+                if command -v gh &>/dev/null; then
+                    if gh auth status &>/dev/null 2>&1; then
+                        log_ok "gh: authenticated"
+                    else
+                        log_warn "gh: not authenticated"
+                        echo ""
+                        echo "  Run: gh auth login"
+                    fi
+                else
+                    log_warn "gh CLI not found — Copilot auth requires GitHub CLI"
+                    echo "  Install: https://cli.github.com"
+                fi
+            fi
+            ;;
+        codex)
+            if ! command -v codex &>/dev/null; then
+                log_error "codex CLI not found."
+                echo ""
+                echo "  Install Codex CLI:"
+                echo "    npm install -g @openai/codex"
+                _ok=false
+            else
+                log_ok "codex CLI: $(command -v codex)"
+                if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+                    log_ok "OPENAI_API_KEY: set"
+                else
+                    log_warn "OPENAI_API_KEY: not set"
+                    echo ""
+                    echo "  Export your key before running skeleton commands:"
+                    echo "    export OPENAI_API_KEY=sk-..."
+                fi
+            fi
+            ;;
+        router_http)
+            log_info "driver: router_http — checking 9router daemon..."
+            if curl -sf "http://localhost:20128/health" &>/dev/null 2>&1; then
+                log_ok "9router: running at localhost:20128"
+            else
+                log_error "9router: not responding at localhost:20128"
+                echo ""
+                echo "  Start 9router:"
+                echo "    skeleton router install   # first time only"
+                echo "    skeleton router start"
+                echo "    skeleton router status"
+                _ok=false
+            fi
+            local _inject="${_dir}/router/inject-env.sh"
+            if [[ -f "${_inject}" ]]; then
+                log_ok "router/inject-env.sh: found"
+            else
+                log_warn "router/inject-env.sh: not found"
+                echo ""
+                echo "  Create ${_inject} with your API keys:"
+                echo "    export ANTHROPIC_BASE_URL=\"http://localhost:20128/v1\""
+                echo "    export ANTHROPIC_API_KEY=\"<your-key>\""
+                echo "    chmod 600 router/inject-env.sh"
+            fi
+            ;;
+        *)
+            log_warn "Unknown provider '${_provider}' — no auth check implemented"
+            ;;
+    esac
+
+    echo ""
+    if [[ "${_ok}" == "true" ]]; then
+        log_ok "Auth check passed. Ready to run skeleton commands."
+    else
+        log_error "Auth check failed. Fix the issues above before running 'skeleton init'."
+        return 1
+    fi
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
 # COMMAND: plan
 # ═════════════════════════════════════════════════════════════════════════════
 # Bridge between a2a-brainstorm (design phase) and skeleton run (execution).
@@ -3594,6 +3731,7 @@ cmd_help() {
     skeleton <command> [options]
 
   COMMANDS:
+    auth [--provider=PROV]    Check provider CLI auth before running commands
     init <language>           Initialize a new project from template
     upgrade [--dir=DIR]       Upgrade existing repo with skeleton-parallel
     doctor [--dir=DIR]        Validate project health and wiring
@@ -3635,6 +3773,9 @@ cmd_help() {
     java        Modular monolith (module/feature pattern)
 
   EXAMPLES:
+    skeleton auth                              # check default provider auth
+    skeleton auth --provider=claude            # check Claude Code auth
+    skeleton auth --provider=router_http       # check 9router health
     skeleton init go --name=my-service
     skeleton init python --name=trading-system --dir=~/projects/trading
     skeleton init nodejs --name=api-gateway --no-agent
@@ -3685,6 +3826,7 @@ main() {
         add)        cmd_add "$@" ;;
         list)       cmd_list "$@" ;;
         sync)       cmd_sync "$@" ;;
+        auth)       cmd_auth "$@" ;;
         plan)       cmd_plan "$@" ;;
         router)     bash "${SKELETON_ROOT}/router/wrap.sh" "$@" ;;
         version)    cmd_version ;;
