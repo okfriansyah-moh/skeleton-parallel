@@ -98,7 +98,7 @@ invoke_agent() {
 
 STAGE: ${stage}
 MANDATORY: Use skills as primary knowledge source (${skills_csv}).
-Follow all constraints in .github/copilot-instructions.md.
+Follow the project's AI constraints as defined in .ai/ (ARES canonical source) and the provider harness file.
 ${AGENT_WORKSPACE_CONSTRAINT}"
 
     mkdir -p "$(dirname "${log_file}")"
