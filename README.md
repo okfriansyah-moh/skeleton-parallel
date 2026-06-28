@@ -64,6 +64,59 @@ skeleton init rust --name=my-lib            # Rust
 skeleton init nodejs --name=my-api          # Node.js
 ```
 
+**1b. Scaffold into a planned multi-role architecture** · `skeleton init --role`
+
+Already have a `docs/architecture.md` with top-level service directories planned? `skeleton init` reads it and acts as an **additive generator** — placing only tooling files, never overwriting your planned structure.
+
+```
+# docs/architecture.md already exists and defines:
+idx-signal-system/
+├── backend/
+│   ├── modules/
+│   ├── shared/
+│   └── tests/
+├── frontend/
+└── mcp-server/
+```
+
+```sh
+# Add Python tooling under backend/ — skips app/, contracts/, database/
+# because backend/ is architecture-declared
+skeleton init python --role=backend --root=backend/
+
+# Add TypeScript tooling under frontend/
+skeleton init typescript --role=frontend --root=frontend/
+
+# Add another Python service under mcp-server/
+skeleton init python --role=mcp-server --root=mcp-server/
+```
+
+Each call places only tooling files (`pyproject.toml`, `requirements.txt`, `.gitignore`, `config/config.yaml`) and never imposes the template's source structure on directories your architecture already owns. A `.skeleton/layout.yaml` manifest is created at the project root recording each role.
+
+```yaml
+# .skeleton/layout.yaml — auto-generated, tracks multi-role layout
+version: "1.0"
+merge_policy: respect-existing
+architecture_source: docs/architecture.md
+roles:
+  backend:
+    language: python
+    root: backend/
+    status: active
+  frontend:
+    language: typescript
+    root: frontend/
+    status: active
+```
+
+**Merge modes** (auto-detected, or override with `--mode`):
+
+| Mode | When used | Behavior |
+|------|-----------|----------|
+| `create` | Fresh empty directory | Full scaffold |
+| `overlay` | Existing dir, no architecture file | Fill missing files only |
+| `respect-existing` | `architecture.md` found + role set | Tooling only; structure dirs skipped |
+
 **2. Execute tasks through any AI provider** · `skeleton run`
 
 Define tasks in `docs/PLAN.md`, then run the full pipeline — all tasks, one task, or a subset.
@@ -294,6 +347,7 @@ skeleton run --full  # execute all pending tasks end-to-end
 | Command                                          | Description                                              |
 | ------------------------------------------------ | -------------------------------------------------------- |
 | `skeleton init <lang> [--name=NAME] [--dir=DIR]` | Scaffold a new project from a language template          |
+| `skeleton init <lang> --role=ROLE --root=PATH`   | Additive init into a planned multi-role architecture     |
 | `skeleton run [tasks…] [flags]`                  | Execute PLAN.md tasks through the full pipeline          |
 | `skeleton run --dry-run`                         | Print execution plan without invoking any agents         |
 | `skeleton run --parallel`                        | One worktree per task (max speed)                        |
@@ -307,6 +361,18 @@ skeleton run --full  # execute all pending tasks end-to-end
 | `skeleton cleanup [--force]`                     | Remove worktrees, branches, clear state                  |
 | `skeleton version`                               | Print version                                            |
 | `skeleton help`                                  | Full usage reference                                     |
+
+### `skeleton init` flags
+
+| Flag            | Default              | Description                                                                 |
+| --------------- | -------------------- | --------------------------------------------------------------------------- |
+| `--name=NAME`   | directory name       | Project name used in generated files                                        |
+| `--dir=DIR`     | `./<name>`           | Target directory                                                            |
+| `--role=ROLE`   | —                    | Logical role name (`backend`, `frontend`, `mcp-server`…). Recorded in `.skeleton/layout.yaml` |
+| `--root=PATH`   | same as `--role`     | Directory prefix for template files (e.g. `backend/`)                      |
+| `--mode=MODE`   | auto-detected        | `create` · `overlay` · `respect-existing`                                  |
+| `--force`       | false                | Overwrite existing files in overlay/respect-existing mode                   |
+| `--no-agent`    | false                | Skip post-init Copilot agent spawn                                          |
 
 ### `skeleton run` flags
 
