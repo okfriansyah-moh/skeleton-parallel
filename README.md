@@ -1,6 +1,7 @@
 # Skeleton Parallel
 
 > Provider-agnostic agentic loop CLI for building deterministic pipeline systems with AI-assisted parallel development. One `docs/PLAN.md` → Copilot, Claude, Codex, Cursor — any driver, any language.
+![Skeleton Parallel infographic](assets/skeleton-parallel-infographics.png)
 
 [![License](https://img.shields.io/github/license/okfriansyah-moh/skeleton-parallel)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/okfriansyah-moh/skeleton-parallel)](https://github.com/okfriansyah-moh/skeleton-parallel/releases/latest)
