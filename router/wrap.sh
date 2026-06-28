@@ -33,7 +33,6 @@ source "${_SKELETON_ROOT}/scripts/lib/common.sh"
 _PIN_FILE="${_WRAP_DIR}/9router-pin.json"
 _ROUTER_PORT="${NINE_ROUTER_PORT:-20128}"
 _ROUTER_HEALTH_URL="http://localhost:${_ROUTER_PORT}/health"
-_ROUTER_NPM_PKG="@9router/server"
 
 # PID file location (inside project's .skeleton-dev/)
 _router_pid_file() {
@@ -42,47 +41,78 @@ _router_pid_file() {
 }
 
 # ── router_install ────────────────────────────────────────────────────────────
-# Install 9router via npm (global) or docker pull.
-# Uses 9router-pin.json for version pinning.
+# Detect or install 9router. Checks for an existing binary first, then reads
+# router/9router-pin.json for a custom npm package or docker image override.
+# Falls back to a manual install guide if nothing is found.
 router_install() {
-    log_step "[router] Installing 9router..."
+    log_step "[router] Checking 9router installation..."
 
-    # Read pinned npm package from pin file
-    local npm_pkg="${_ROUTER_NPM_PKG}"
-    if command -v python3 &>/dev/null && [[ -f "${_PIN_FILE}" ]]; then
-        local _pkg
-        _pkg="$(python3 -c "import json; d=json.load(open('${_PIN_FILE}')); print(d.get('npm','${_ROUTER_NPM_PKG}'))" 2>/dev/null || true)"
-        [[ -n "${_pkg}" ]] && npm_pkg="${_pkg}"
-    fi
-
-    # Try npm global install first
-    if command -v npm &>/dev/null; then
-        log_info "[router] Installing via npm: ${npm_pkg}"
-        npm install -g "${npm_pkg}"
-        log_ok "[router] 9router installed via npm"
-
-        # Generate inject-env.sh stub (filled in after oauth)
+    # Already in PATH — nothing to do
+    if command -v 9router &>/dev/null; then
+        log_ok "[router] 9router already installed: $(command -v 9router)"
         _generate_inject_env_stub
         return 0
     fi
 
-    # Fallback: docker pull
-    if command -v docker &>/dev/null; then
-        local docker_image="9router/server:latest"
-        if command -v python3 &>/dev/null && [[ -f "${_PIN_FILE}" ]]; then
-            local _img
-            _img="$(python3 -c "import json; d=json.load(open('${_PIN_FILE}')); print(d.get('docker','${docker_image}'))" 2>/dev/null || true)"
-            [[ -n "${_img}" ]] && docker_image="${_img}"
-        fi
-        log_info "[router] Pulling docker image: ${docker_image}"
-        docker pull "${docker_image}"
-        log_ok "[router] 9router docker image pulled: ${docker_image}"
-        return 0
+    # Read custom npm package / docker image from pin file (if set by maintainer)
+    local custom_npm="" custom_docker=""
+    if command -v python3 &>/dev/null && [[ -f "${_PIN_FILE}" ]]; then
+        custom_npm="$(python3 -c "
+import json, sys
+d = json.load(open('${_PIN_FILE}'))
+v = d.get('npm', '')
+# Ignore the placeholder value written by earlier versions of skeleton
+if v and v != '@9router/server':
+    print(v)
+" 2>/dev/null || true)"
+        custom_docker="$(python3 -c "
+import json
+d = json.load(open('${_PIN_FILE}'))
+v = d.get('docker', '')
+if v and v != '9router/server:latest':
+    print(v)
+" 2>/dev/null || true)"
     fi
 
-    log_error "[router] Neither npm nor docker found — cannot install 9router"
-    log_info "  Install npm: https://nodejs.org"
-    log_info "  Or install docker: https://docs.docker.com/get-docker/"
+    # npm install — only when a real package name is pinned
+    if [[ -n "${custom_npm}" ]] && command -v npm &>/dev/null; then
+        log_info "[router] Installing via npm: ${custom_npm}"
+        if npm install -g "${custom_npm}"; then
+            log_ok "[router] 9router installed via npm"
+            _generate_inject_env_stub
+            return 0
+        fi
+        log_warn "[router] npm install failed, trying next method..."
+    fi
+
+    # Docker — only when a real image is pinned
+    if [[ -n "${custom_docker}" ]] && command -v docker &>/dev/null; then
+        log_info "[router] Pulling docker image: ${custom_docker}"
+        if docker pull "${custom_docker}"; then
+            log_ok "[router] 9router docker image pulled: ${custom_docker}"
+            _generate_inject_env_stub
+            return 0
+        fi
+        log_warn "[router] docker pull failed"
+    fi
+
+    # Nothing worked — guide the user
+    log_error "[router] 9router not found. Manual install required."
+    echo ""
+    echo "  9router is a local OpenAI-compatible proxy daemon (port 20128)."
+    echo "  Install it from your provider's site or release page, then add"
+    echo "  the binary to your PATH."
+    echo ""
+    echo "  Once installed:"
+    echo "    skeleton router start"
+    echo "    skeleton router status"
+    echo ""
+    echo "  To pin a specific npm package or docker image, edit:"
+    echo "    router/9router-pin.json   →  { \"npm\": \"pkg\", \"docker\": \"image:tag\" }"
+    echo "  Then re-run: skeleton router install"
+    echo ""
+    echo "  If 9router is already running at localhost:20128, skip install:"
+    echo "    skeleton router health"
     return 1
 }
 
@@ -152,7 +182,7 @@ router_start() {
     if command -v 9router &>/dev/null; then
         9router --port "${_ROUTER_PORT}" &>/dev/null &
     else
-        npx "${_ROUTER_NPM_PKG}" --port "${_ROUTER_PORT}" &>/dev/null &
+        npx 9router --port "${_ROUTER_PORT}" &>/dev/null &
     fi
 
     local pid=$!
