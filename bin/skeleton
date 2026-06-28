@@ -3087,7 +3087,7 @@ cmd_auth() {
             ;;
         router_http)
             log_info "Checking 9router daemon at localhost:20128..."
-            if curl -sf "http://localhost:20128/health" &>/dev/null 2>&1; then
+            if curl -sf "http://localhost:20128/api/health" &>/dev/null 2>&1; then
                 log_ok "9router: running"
             else
                 log_error "9router: not responding at localhost:20128"

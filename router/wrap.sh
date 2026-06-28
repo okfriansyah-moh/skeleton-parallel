@@ -32,7 +32,8 @@ source "${_SKELETON_ROOT}/scripts/lib/common.sh"
 # ── Constants (from 9router-pin.json) ─────────────────────────────────────────
 _PIN_FILE="${_WRAP_DIR}/9router-pin.json"
 _ROUTER_PORT="${NINE_ROUTER_PORT:-20128}"
-_ROUTER_HEALTH_URL="http://localhost:${_ROUTER_PORT}/health"
+_ROUTER_HEALTH_URL="http://localhost:${_ROUTER_PORT}/api/health"
+_ROUTER_DASHBOARD_URL="http://localhost:${_ROUTER_PORT}/dashboard"
 
 # PID file location (inside project's .skeleton-dev/)
 _router_pid_file() {
@@ -176,29 +177,37 @@ router_start() {
 
     mkdir -p "$(dirname "${pid_file}")"
 
+    # Log file so startup errors are visible
+    local log_file
+    log_file="$(dirname "${pid_file}")/9router.log"
+
     log_step "[router] Starting 9router on port ${_ROUTER_PORT}..."
 
     if command -v 9router &>/dev/null; then
-        9router --port "${_ROUTER_PORT}" &>/dev/null &
+        # -p  port   -n  no-browser (headless daemon mode)
+        9router -p "${_ROUTER_PORT}" -n > "${log_file}" 2>&1 &
     else
-        npx 9router --port "${_ROUTER_PORT}" &>/dev/null &
+        npx 9router -p "${_ROUTER_PORT}" -n > "${log_file}" 2>&1 &
     fi
 
     local pid=$!
     echo "${pid}" > "${pid_file}"
 
-    # Wait up to 3 seconds for health check to pass
+    # Wait up to 5 seconds for health check to pass
     local attempts=0
-    while (( attempts < 6 )); do
+    while (( attempts < 10 )); do
         sleep 0.5
         if _router_http_healthy; then
             log_ok "[router] 9router started (PID: ${pid}, port: ${_ROUTER_PORT})"
+            log_info "[router] Dashboard: ${_ROUTER_DASHBOARD_URL}"
+            log_info "[router] Logs:      ${log_file}"
             return 0
         fi
         (( attempts++ ))
     done
 
-    log_warn "[router] 9router started (PID: ${pid}) but health check not responding yet"
+    log_warn "[router] 9router process launched (PID: ${pid}) but health check not responding yet"
+    log_info "[router] Check logs: cat ${log_file}"
     log_info "[router] Check: skeleton router health"
     return 0
 }
@@ -291,8 +300,9 @@ router_status() {
         echo -e "  Health:     ${YELLOW}unreachable${NC} (${_ROUTER_HEALTH_URL})"
     fi
 
-    # Port
+    # Port + dashboard
     echo -e "  Port:       ${_ROUTER_PORT}"
+    echo -e "  Dashboard:  ${_ROUTER_DASHBOARD_URL}"
 
     # inject-env.sh
     if [[ -f "${_WRAP_DIR}/inject-env.sh" ]]; then

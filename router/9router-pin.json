@@ -3,5 +3,6 @@
   "npm": "9router",
   "docker": "",
   "port": 20128,
-  "health_endpoint": "http://localhost:20128/health"
+  "health_endpoint": "http://localhost:20128/api/health",
+  "dashboard": "http://localhost:20128/dashboard"
 }

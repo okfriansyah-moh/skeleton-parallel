@@ -269,7 +269,7 @@ skeleton router status    # verify: Running: yes, Health: OK
 skeleton router oauth     # print OAuth setup guide for each provider
 ```
 
-After `start`, open `http://localhost:20128` → **Connections** → add your provider (Claude, Copilot, Codex) → copy the token into `router/inject-env.sh`:
+After `start`, open `http://localhost:20128/dashboard` → **Connections** → add your provider (Claude, Copilot, Codex) → copy the token into `router/inject-env.sh`:
 
 ```bash
 # router/inject-env.sh  (chmod 600, never commit)
