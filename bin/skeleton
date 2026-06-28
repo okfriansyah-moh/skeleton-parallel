@@ -85,26 +85,60 @@ _validate_project_name() {
     fi
 }
 
-# ── Copilot Agent Helpers ────────────────────────────────────────────────────
+# ── Agent Helpers (provider-agnostic, ARES-aligned) ─────────────────────────
 
-# Check if Copilot CLI is available — required for agent-first workflow
-_check_copilot_available() {
-    if command -v copilot &>/dev/null; then
-        return 0
+# Detect the configured AI provider for a given project directory.
+# Reads config/skeleton.yaml; defaults to "copilot" for backward compatibility.
+_detect_provider_for_dir() {
+    local dir="${1:-.}"
+    local p=""
+    if [[ -f "${dir}/config/skeleton.yaml" ]]; then
+        p="$(grep -E '^\s*provider\s*:' "${dir}/config/skeleton.yaml" \
+            2>/dev/null | head -1 | sed 's/.*://;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
     fi
-    return 1
+    echo "${p:-copilot}"
 }
 
-# Require Copilot CLI — die if not found
-_require_copilot() {
-    if ! _check_copilot_available; then
-        die "Copilot CLI is required. Install with: npm install -g @githubnext/github-copilot-cli\nAlternative: use --no-agent to skip agent validation."
+# Return the ARES-composed harness file path for a given provider.
+# These files are ARES outputs — skeleton reads them, never writes them.
+_provider_harness_file() {
+    case "${1:-copilot}" in
+        copilot)     echo ".github/copilot-instructions.md" ;;
+        claude)      echo "CLAUDE.md" ;;
+        codex)       echo "AGENTS.md" ;;
+        cursor)      echo ".cursor/rules/" ;;
+        antigravity) echo ".antigravity/" ;;
+        *)           echo ".ai/manifest.yaml" ;;
+    esac
+}
+
+# Check whether the CLI binary for the given provider is available.
+_check_agent_cli_available() {
+    local provider="${1:-copilot}"
+    case "${provider}" in
+        copilot) command -v copilot &>/dev/null ;;
+        claude)  command -v claude  &>/dev/null ;;
+        codex)   command -v codex   &>/dev/null ;;
+        *)       return 0 ;;  # sdk_cursor / router_http — no binary needed
+    esac
+}
+
+# Die with a provider-specific install hint if the CLI binary is missing.
+_require_agent_cli() {
+    local provider="${1:-copilot}"
+    if ! _check_agent_cli_available "${provider}"; then
+        case "${provider}" in
+            copilot) die "copilot CLI not found. Install: npm install -g @githubnext/github-copilot-cli\nAlternative: use --no-agent to skip." ;;
+            claude)  die "claude CLI not found. Install: https://claude.ai/code\nAlternative: use --no-agent to skip." ;;
+            codex)   die "codex CLI not found. Install: https://platform.openai.com/codex\nAlternative: use --no-agent to skip." ;;
+            *)       die "No CLI binary available for provider '${provider}'. Use --no-agent to skip." ;;
+        esac
     fi
 }
 
-# Spawn a Copilot agent in foreground (blocking — waits for completion)
-# Usage: _spawn_copilot_agent <work_dir> <agent_name> <prompt> [log_label]
-_spawn_copilot_agent() {
+# Spawn an agent in the foreground (blocking) using the project's configured provider.
+# Usage: _spawn_agent <work_dir> <agent_name> <prompt> [log_label]
+_spawn_agent() {
     local work_dir="$1"
     local agent_name="$2"
     local prompt="$3"
@@ -115,26 +149,61 @@ _spawn_copilot_agent() {
         return 0
     fi
 
-    _require_copilot
+    local provider; provider="$(_detect_provider_for_dir "${work_dir}")"
+    local harness_file; harness_file="$(_provider_harness_file "${provider}")"
+    local full_prompt="${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow constraints in ${harness_file} (ARES-composed harness). ${COPILOT_WORKSPACE_CONSTRAINT}"
 
     local log_dir="${work_dir}/${COPILOT_LOG_DIR}"
     mkdir -p "${log_dir}"
     local log_file="${log_dir}/${log_label}-$(date +%Y%m%d-%H%M%S).log"
 
-    log_step "Spawning agent: ${BOLD}${agent_name}${NC} (model: ${COPILOT_MODEL})"
+    log_step "Spawning agent: ${BOLD}${agent_name}${NC} (provider: ${provider}, model: ${AGENT_MODEL})"
 
-    (
-        cd "${work_dir}"
-        copilot \
-            -p "${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow all constraints in .github/copilot-instructions.md. ${COPILOT_WORKSPACE_CONSTRAINT}" \
-            --agent="${agent_name}" \
-            --model="${COPILOT_MODEL}" \
-            --no-ask-user \
-            --allow-all-tools \
-            --autopilot \
-            2>&1 | tee "${log_file}"
-    )
-    local exit_code=${PIPESTATUS[0]:-$?}
+    local exit_code=0
+    case "${provider}" in
+        copilot)
+            _require_agent_cli "copilot"
+            (
+                cd "${work_dir}"
+                copilot \
+                    -p "${full_prompt}" \
+                    --agent="${agent_name}" \
+                    --model="${AGENT_MODEL}" \
+                    --no-ask-user \
+                    --allow-all-tools \
+                    --autopilot \
+                    2>&1 | tee "${log_file}"
+            )
+            exit_code=${PIPESTATUS[0]:-$?}
+            ;;
+        claude)
+            _require_agent_cli "claude"
+            (
+                cd "${work_dir}"
+                claude \
+                    -p "${full_prompt}" \
+                    --model="${AGENT_MODEL}" \
+                    --allowedTools all \
+                    --non-interactive \
+                    2>&1 | tee "${log_file}"
+            )
+            exit_code=${PIPESTATUS[0]:-$?}
+            ;;
+        codex)
+            _require_agent_cli "codex"
+            (
+                cd "${work_dir}"
+                codex \
+                    -p "${full_prompt}" \
+                    2>&1 | tee "${log_file}"
+            )
+            exit_code=${PIPESTATUS[0]:-$?}
+            ;;
+        *)
+            log_warn "Provider '${provider}' — foreground agent CLI not implemented; skipping"
+            return 0
+            ;;
+    esac
 
     if [[ ${exit_code} -eq 0 ]]; then
         log_ok "Agent ${agent_name} completed successfully"
@@ -144,9 +213,9 @@ _spawn_copilot_agent() {
     return ${exit_code}
 }
 
-# Spawn a Copilot agent in background (non-blocking — returns immediately)
-# Usage: _spawn_copilot_agent_bg <work_dir> <agent_name> <prompt> [log_label]
-_spawn_copilot_agent_bg() {
+# Spawn an agent in the background (non-blocking) using the project's configured provider.
+# Usage: _spawn_agent_bg <work_dir> <agent_name> <prompt> [log_label]
+_spawn_agent_bg() {
     local work_dir="$1"
     local agent_name="$2"
     local prompt="$3"
@@ -156,31 +225,76 @@ _spawn_copilot_agent_bg() {
         return 0
     fi
 
-    if ! _check_copilot_available; then
-        log_warn "Copilot CLI not found — skipping background agent"
+    local provider; provider="$(_detect_provider_for_dir "${work_dir}")"
+
+    if ! _check_agent_cli_available "${provider}"; then
+        log_warn "${provider} CLI not found — skipping background agent"
         return 0
     fi
+
+    local harness_file; harness_file="$(_provider_harness_file "${provider}")"
+    local full_prompt="${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow constraints in ${harness_file} (ARES-composed harness). ${COPILOT_WORKSPACE_CONSTRAINT}"
 
     local log_dir="${work_dir}/${COPILOT_LOG_DIR}"
     mkdir -p "${log_dir}"
     local log_file="${log_dir}/${log_label}-$(date +%Y%m%d-%H%M%S).log"
 
-    log_info "Spawning background agent: ${agent_name} (log: ${log_file})"
+    log_info "Spawning background agent: ${agent_name} (provider: ${provider}, log: ${log_file})"
 
-    (
-        cd "${work_dir}"
-        copilot \
-            -p "${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow all constraints in .github/copilot-instructions.md. ${COPILOT_WORKSPACE_CONSTRAINT}" \
-            --agent="${agent_name}" \
-            --model="${COPILOT_MODEL}" \
-            --no-ask-user \
-            --allow-all-tools \
-            --autopilot \
-            &>"${log_file}"
-    ) &
+    case "${provider}" in
+        copilot)
+            (
+                cd "${work_dir}"
+                copilot \
+                    -p "${full_prompt}" \
+                    --agent="${agent_name}" \
+                    --model="${AGENT_MODEL}" \
+                    --no-ask-user \
+                    --allow-all-tools \
+                    --autopilot \
+                    &>"${log_file}"
+            ) &
+            ;;
+        claude)
+            (
+                cd "${work_dir}"
+                claude \
+                    -p "${full_prompt}" \
+                    --model="${AGENT_MODEL}" \
+                    --allowedTools all \
+                    --non-interactive \
+                    &>"${log_file}"
+            ) &
+            ;;
+        codex)
+            (
+                cd "${work_dir}"
+                codex \
+                    -p "${full_prompt}" \
+                    &>"${log_file}"
+            ) &
+            ;;
+        *)
+            log_warn "Provider '${provider}' — background agent CLI not implemented; skipping"
+            return 0
+            ;;
+    esac
     local bg_pid=$!
     log_info "Background agent PID: ${bg_pid}"
 }
+
+# ── Backward-compatible aliases (keep all existing call sites unchanged) ──────
+_spawn_copilot_agent()    { _spawn_agent    "$@"; }
+_spawn_copilot_agent_bg() { _spawn_agent_bg "$@"; }
+_check_copilot_available() {
+    local dir="${1:-.}"
+    _check_agent_cli_available "$(_detect_provider_for_dir "${dir}")"
+}
+_require_copilot() {
+    local dir="${1:-.}"
+    _require_agent_cli "$(_detect_provider_for_dir "${dir}")"
+}
+
 
 # Detect existing skeleton-parallel mechanisms in a directory
 # Returns space-separated list of found mechanisms
@@ -2333,9 +2447,11 @@ _add_skill() {
         die "Skill '${name}' not found.\nAvailable: $(get_available_skills | tr '\n' ' ')"
     fi
 
-    mkdir -p "${dest}/.github/skills"
-    cp -R "${src}" "${dest}/.github/skills/"
-    log_ok "Skill '${name}' installed to ${dest}/.github/skills/${name}/"
+    # Install to .ai/skills/ — ARES canonical source
+    mkdir -p "${dest}/.ai/skills"
+    cp -R "${src}" "${dest}/.ai/skills/"
+    log_ok "Skill '${name}' installed to ${dest}/.ai/skills/${name}/"
+    log_info "  Run 'ars compose --target <provider>' to update your provider harness."
 }
 
 _add_agent() {
@@ -2346,9 +2462,11 @@ _add_agent() {
         die "Agent '${name}' not found.\nAvailable: $(get_available_agents | tr '\n' ' ')"
     fi
 
-    mkdir -p "${dest}/.github/agents"
-    cp "${src}" "${dest}/.github/agents/"
-    log_ok "Agent '${name}' installed to ${dest}/.github/agents/${name}.agent.md"
+    # Install to .ai/agents/ — ARES canonical source
+    mkdir -p "${dest}/.ai/agents"
+    cp "${src}" "${dest}/.ai/agents/"
+    log_ok "Agent '${name}' installed to ${dest}/.ai/agents/${name}.agent.md"
+    log_info "  Run 'ars compose --target <provider>' to update your provider harness."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2429,52 +2547,77 @@ cmd_sync() {
     log_info "Target:       ${BOLD}${target_dir}${NC}"
     echo ""
 
-    # Force-sync all framework files
     # Guard: ensure target_dir is set and non-empty
     [[ -z "${target_dir}" ]] && die "Target directory is empty — aborting sync"
     [[ ! -d "${target_dir}" ]] && die "Target directory does not exist: ${target_dir}"
 
-    log_step "Syncing skills..."
+    # ── Sync skills, agents, prompts → .ai/ (ARES canonical source) ──────────
+    log_step "Syncing skills → .ai/skills/ (ARES canonical)..."
     if [[ -d "${SKELETON_ROOT}/.github/skills" ]]; then
-        [[ -d "${target_dir}/.github/skills" ]] && rm -rf "${target_dir}/.github/skills"
-        mkdir -p "${target_dir}/.github"
-        cp -R "${SKELETON_ROOT}/.github/skills" "${target_dir}/.github/"
-        log_ok "Skills synced"
+        mkdir -p "${target_dir}/.ai/skills"
+        cp -R "${SKELETON_ROOT}/.github/skills/." "${target_dir}/.ai/skills/"
+        log_ok "Skills synced to .ai/skills/"
     fi
 
-    log_step "Syncing agents..."
+    log_step "Syncing agents → .ai/agents/ (ARES canonical)..."
     if [[ -d "${SKELETON_ROOT}/.github/agents" ]]; then
-        [[ -d "${target_dir}/.github/agents" ]] && rm -rf "${target_dir}/.github/agents"
-        mkdir -p "${target_dir}/.github"
-        cp -R "${SKELETON_ROOT}/.github/agents" "${target_dir}/.github/"
-        log_ok "Agents synced"
+        mkdir -p "${target_dir}/.ai/agents"
+        cp -R "${SKELETON_ROOT}/.github/agents/." "${target_dir}/.ai/agents/"
+        log_ok "Agents synced to .ai/agents/"
     fi
 
-    log_step "Syncing prompts..."
+    log_step "Syncing prompts → .ai/prompts/ (ARES canonical)..."
     if [[ -d "${SKELETON_ROOT}/.github/prompts" ]]; then
-        [[ -d "${target_dir}/.github/prompts" ]] && rm -rf "${target_dir}/.github/prompts"
-        mkdir -p "${target_dir}/.github"
-        cp -R "${SKELETON_ROOT}/.github/prompts" "${target_dir}/.github/"
-        log_ok "Prompts synced"
+        mkdir -p "${target_dir}/.ai/prompts"
+        cp -R "${SKELETON_ROOT}/.github/prompts/." "${target_dir}/.ai/prompts/"
+        log_ok "Prompts synced to .ai/prompts/"
     fi
 
     log_step "Syncing run_parallel.sh..."
     mkdir -p "${target_dir}/scripts"
-    cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${target_dir}/scripts/"
-    chmod +x "${target_dir}/scripts/run_parallel.sh"
-    log_ok "run_parallel.sh synced"
+    if [[ -f "${SKELETON_ROOT}/scripts/run_parallel.sh" ]]; then
+        cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${target_dir}/scripts/"
+        chmod +x "${target_dir}/scripts/run_parallel.sh"
+        log_ok "run_parallel.sh synced"
+    fi
 
-    log_step "Syncing copilot-instructions.md..."
-    cp "${SKELETON_ROOT}/.github/copilot-instructions.md" "${target_dir}/.github/"
-    log_ok "copilot-instructions.md synced"
+    echo ""
+    log_ok "Knowledge synced to .ai/ — now composing provider harness via ARES..."
+    echo ""
+
+    # ── Compose provider harness (ARES owns this) ─────────────────────────────
+    local _sync_provider; _sync_provider="$(_detect_provider_for_dir "${target_dir}")"
+    if command -v ars &>/dev/null; then
+        log_step "Running: ars compose --target ${_sync_provider}"
+        ( cd "${target_dir}" && ars compose --target "${_sync_provider}" 2>&1 )             && log_ok "Provider harness composed via ars (target: ${_sync_provider})"             || log_warn "ars compose failed — run manually: ars compose --target ${_sync_provider}"
+    else
+        log_warn "ars CLI not found — it is required to compose the provider harness."
+        log_info "  Install: curl -fsSL https://github.com/okfriansyah-moh/ares/releases/latest/download/install.sh | bash"
+        echo ""
+        local _install_ars=""
+        # shellcheck disable=SC2162
+        read -r -p "  Install ars now and compose the harness? [y/N] " _install_ars
+        if [[ "${_install_ars}" =~ ^[Yy]$ ]]; then
+            log_step "Installing ars..."
+            if curl -fsSL https://github.com/okfriansyah-moh/ares/releases/latest/download/install.sh | bash; then
+                log_ok "ars installed"
+                ( cd "${target_dir}" && ars compose --target "${_sync_provider}" 2>&1 )                     && log_ok "Provider harness composed (target: ${_sync_provider})"                     || log_warn "ars compose failed — run manually: ars compose --target ${_sync_provider}"
+            else
+                log_error "ars installation failed — see https://github.com/okfriansyah-moh/ares"
+            fi
+        else
+            log_info "Skipping ars install. Provider harness not composed."
+            log_info "Run when ready: ars compose --target ${_sync_provider}"
+        fi
+    fi
 
     echo ""
     log_ok "Sync complete!"
     echo ""
 
-    # Background agent validates sync results
-    _spawn_copilot_agent_bg "${target_dir}" "doctor" \
-        "Validate post-sync state: 1) All skills match upstream (${SKELETON_ROOT}). 2) All agents match upstream. 3) run_parallel.sh is current and executable. 4) copilot-instructions.md is current. 5) No custom configurations were accidentally overwritten. Report findings in .parallel-dev/agent-logs/." \
+    # Background validation (provider-aware)
+    _spawn_agent_bg "${target_dir}" "doctor" \
+        "Validate post-sync state: 1) .ai/skills/ and .ai/agents/ match upstream (${SKELETON_ROOT}). 2) Provider harness file is current (run 'ars compose' if stale). 3) run_parallel.sh is executable. 4) No custom configurations were accidentally overwritten. Report findings in .parallel-dev/agent-logs/." \
         "sync-validation"
 }
 
@@ -2838,6 +2981,326 @@ _autoskills_merge_skill() {
     fi
 }
 
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: plan
+# ═════════════════════════════════════════════════════════════════════════════
+# Bridge between a2a-brainstorm (design phase) and skeleton run (execution).
+#
+# Two modes:
+#   --from=PATH    Import an a2a-brainstorm plan.md and enrich it into
+#                  skeleton's execution format (task IDs, deps, file ownership,
+#                  acceptance criteria checkboxes). Recommended — a2a produces
+#                  higher-quality design context than a single generate pass.
+#
+#   --source=PATH  Generate docs/PLAN.md from scratch using an architecture doc
+#                  when no a2a session was run.
+#
+# Both modes write docs/PLAN.md, validate with bash -n, and print next steps.
+cmd_plan() {
+    local target_dir="."
+    local a2a_plan=""
+    local source_doc=""
+    local output_doc="docs/PLAN.md"
+    local dry_run=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir=*)    target_dir="${1#*=}"; shift ;;
+            --dir)      target_dir="${2}"; shift 2 ;;
+            --from=*)   a2a_plan="${1#*=}"; shift ;;
+            --from)     a2a_plan="${2}"; shift 2 ;;
+            --source=*) source_doc="${1#*=}"; shift ;;
+            --source)   source_doc="${2}"; shift 2 ;;
+            --output=*) output_doc="${1#*=}"; shift ;;
+            --output)   output_doc="${2}"; shift 2 ;;
+            --dry-run)  dry_run=true; shift ;;
+            --no-agent) SKIP_AGENT=true; shift ;;
+            -*)         die "Unknown option: $1" ;;
+            *)          break ;;
+        esac
+    done
+
+    target_dir="$(cd "${target_dir}" && pwd)"
+    local output_path="${target_dir}/${output_doc}"
+
+    # ── Guard: can't use both modes at once ──────────────────────────────────
+    if [[ -n "${a2a_plan}" && -n "${source_doc}" ]]; then
+        die "Use either --from or --source, not both."
+    fi
+
+    # ── Mode detection ────────────────────────────────────────────────────────
+    local _mode=""
+    if [[ -n "${a2a_plan}" ]]; then
+        _mode="a2a-import"
+    elif [[ -n "${source_doc}" ]]; then
+        _mode="generate"
+    else
+        # Auto-detect: prefer a2a plan if present
+        for _candidate in "docs/plan.md" "plan.md" "docs/a2a-plan.md"; do
+            if [[ -f "${target_dir}/${_candidate}" ]]; then
+                a2a_plan="${_candidate}"
+                _mode="a2a-import"
+                break
+            fi
+        done
+        # Fall back to architecture doc
+        if [[ -z "${_mode}" ]]; then
+            for _candidate in "docs/architecture.md" "docs/ARCHITECTURE.md" \
+                              "docs/spec.md" "docs/requirements.md" \
+                              "docs/implementation_roadmap.md" "ARCHITECTURE.md"; do
+                if [[ -f "${target_dir}/${_candidate}" ]]; then
+                    source_doc="${_candidate}"
+                    _mode="generate"
+                    break
+                fi
+            done
+        fi
+        if [[ -z "${_mode}" ]]; then
+            die "No a2a plan or architecture doc found.\n  Run 'a2a-brainstorm' to design first, then:\n    skeleton plan --from=path/to/plan.md\n  Or generate from an architecture doc:\n    skeleton plan --source=docs/architecture.md"
+        fi
+    fi
+
+    # ── Guard: existing PLAN.md ──────────────────────────────────────────────
+    if [[ -f "${output_path}" && "${dry_run}" != "true" ]]; then
+        local _overwrite=""
+        log_warn "${output_doc} already exists."
+        read -r -p "  Overwrite? [y/N] " _overwrite
+        [[ ! "${_overwrite}" =~ ^[Yy]$ ]] && { log_info "Aborted."; return 0; }
+    fi
+
+    # ── Mode: a2a-import ──────────────────────────────────────────────────────
+    if [[ "${_mode}" == "a2a-import" ]]; then
+        local a2a_path="${target_dir}/${a2a_plan}"
+        [[ ! -f "${a2a_path}" ]] && die "a2a plan not found: ${a2a_path}"
+
+        log_step "Importing a2a-brainstorm plan: ${BOLD}${a2a_plan}${NC}"
+        log_info "  Enriching for skeleton execution format..."
+        log_info "  Output: ${output_doc}"
+
+        if [[ "${dry_run}" == "true" ]]; then
+            log_info "  [dry-run] Would enrich ${a2a_plan} → ${output_doc}"
+            log_info "  [dry-run] Adds: T-001 IDs, Depends:, Files: paths, Acceptance: checkboxes"
+            return 0
+        fi
+
+        local _a2a_content
+        _a2a_content="$(cat "${a2a_path}")"
+
+        local _prompt
+        _prompt="You are a senior engineering lead bridging the gap between architecture design and implementation execution.
+
+The following PLAN.md was generated by a2a-brainstorm (a multi-agent architecture design tool). It contains rich architectural context, goal statements, tech stack, project structure, and task definitions. Your job is to reformat it into skeleton-parallel's execution format so the agentic loop CLI can run it directly.
+
+=== a2a-brainstorm PLAN.md ===
+${_a2a_content}
+=== END ===
+
+REFORMAT RULES:
+1. Keep ALL content — Goal, Architecture Overview, Tech Stack, Project Structure sections stay as-is.
+2. For every task/phase, add these fields in this exact order:
+   **ID:** T-001 (sequential, T-001 format)
+   **Depends:** T-XXX or none (based on the order/dependency in the original plan)
+   **Estimated:** S, M, or L (based on task complexity)
+   **Files:**
+     - \`actual/path/from/structure.py\` — what this file does
+     - \`tests/test_file.py\` — unit tests for this component
+   **Acceptance:**
+     - [ ] Specific functional criterion (not generic)
+     - [ ] Integration criterion
+     - [ ] Tests pass
+3. Extract file paths from 'Files to create:', '**Files:**', or the project structure section.
+4. Convert 'Validation:' / 'Acceptance:' bullet points into checkbox format (- [ ]).
+5. Keep the task name, goal, and all implementation notes — enrich, don't truncate.
+6. The first task must have Depends: none.
+7. Task IDs are strictly sequential: T-001, T-002, T-003…
+
+QUALITY BAR (skeleton-parallel's plan_parser.py requirements):
+- Every task has ID, Depends, Files, and Acceptance sections.
+- Every acceptance criterion is specific and verifiable (not 'works correctly').
+- File paths are concrete (no 'path/to/file.py' placeholders — use real paths from the structure).
+
+Output ONLY the PLAN.md content starting with '# PLAN.md' — no preamble, no explanation."
+
+        _plan_spawn_agent "${target_dir}" "${_prompt}" "${output_path}"
+        return $?
+    fi
+
+    # ── Mode: generate ────────────────────────────────────────────────────────
+    local source_path="${target_dir}/${source_doc}"
+    [[ ! -f "${source_path}" ]] && die "Architecture doc not found: ${source_path}"
+
+    log_step "Generating PLAN.md from: ${BOLD}${source_doc}${NC}"
+    log_info "  (Tip: run 'a2a-brainstorm' first for higher-quality plans)"
+    log_info "  Output: ${output_doc}"
+
+    if [[ "${dry_run}" == "true" ]]; then
+        log_info "  [dry-run] Would spawn plan-management agent on ${source_doc}"
+        log_info "  [dry-run] Would write: ${output_path}"
+        return 0
+    fi
+
+    local _source_content
+    _source_content="$(cat "${source_path}")"
+
+    # Include sibling docs for context
+    local _context_block=""
+    for _doc in "${target_dir}/docs/"*.md; do
+        [[ -f "${_doc}" && "${_doc}" != "${source_path}" ]] || continue
+        _context_block+="
+=== $(basename "${_doc}") (first 80 lines) ===
+$(head -80 "${_doc}" 2>/dev/null)
+"
+    done
+
+    local _prompt
+    _prompt="You are a senior software architect. Read the architecture document and generate a complete, execution-ready docs/PLAN.md that skeleton-parallel's agentic loop CLI can run directly.
+
+=== PRIMARY DOCUMENT: ${source_doc} ===
+${_source_content}
+${_context_block}
+
+GENERATE A PLAN.md with this structure:
+
+# PLAN.md — [Project Name] Implementation Plan
+
+> **Status:** Ready for Implementation
+> **Source:** ${source_doc}
+
+## 1. Goal
+[One concise paragraph: what the system does, why it exists, its scope boundary]
+
+## 2. Architecture Overview
+[2-3 sentence summary: language, key modules, data flow, deployment shape]
+
+## 3. Tech Stack
+\`\`\`
+[key choices as a code block: language version, storage, key libraries, external APIs]
+\`\`\`
+
+## 4. Project Structure
+\`\`\`
+[directory tree from the architecture doc]
+\`\`\`
+
+## 5. Tasks
+
+### Task 1: [Name from first Build Phase / module]
+**ID:** T-001
+**Depends:** none
+**Estimated:** S|M|L
+**Files:**
+  - \`path/to/file.py\` — [specific purpose]
+  - \`tests/test_file.py\` — unit tests
+**Acceptance:**
+  - [ ] [Specific functional criterion]
+  - [ ] [Integration or data criterion]
+  - [ ] Tests pass (pytest/equivalent)
+  - [ ] No import errors
+
+### Task 2: [Next phase]
+**ID:** T-002
+**Depends:** T-001
+...
+
+RULES:
+1. Map each numbered Build Phase in the doc to one Task (split large phases into 2 tasks max).
+2. First task: Depends: none. All others: Depends: T-XXX based on phase order.
+3. Files: use REAL paths from the directory structure in the doc — no placeholders.
+4. Acceptance: minimum 3 criteria, all specific and verifiable.
+5. Output ONLY the PLAN.md content starting with '# PLAN.md'.
+6. Tip: run a2a-brainstorm first for richer architectural context — this is a single-agent generation."
+
+    _plan_spawn_agent "${target_dir}" "${_prompt}" "${output_path}"
+    return $?
+}
+
+# ── _plan_spawn_agent ─────────────────────────────────────────────────────────
+# Internal: spawn agent with given prompt, capture output to output_path.
+# Used by both modes of cmd_plan.
+_plan_spawn_agent() {
+    local _work_dir="$1"
+    local _prompt="$2"
+    local _output_path="$3"
+
+    if [[ "${SKIP_AGENT:-false}" == "true" ]]; then
+        log_warn "--no-agent set: cannot generate without an agent."
+        log_info "  Write ${_output_path} manually from the Build Phases in your architecture doc."
+        return 1
+    fi
+
+    local _provider; _provider="$(_detect_provider_for_dir "${_work_dir}")"
+    _require_agent_cli "${_provider}"
+
+    local _agent_out; _agent_out="$(mktemp)"
+    mkdir -p "$(dirname "${_output_path}")"
+
+    log_step "Spawning plan-management agent (provider: ${_provider}, model: ${AGENT_MODEL})..."
+
+    case "${_provider}" in
+        claude)
+            ( cd "${_work_dir}"
+              claude -p "${_prompt}" \
+                  --model="${AGENT_MODEL}" \
+                  --allowedTools none \
+                  --non-interactive \
+                  2>/dev/null
+            ) > "${_agent_out}" || true
+            ;;
+        copilot)
+            ( cd "${_work_dir}"
+              copilot -p "${_prompt}" \
+                  --agent=task-runner \
+                  --model="${AGENT_MODEL}" \
+                  --no-ask-user \
+                  --allow-all-tools \
+                  --autopilot \
+                  2>/dev/null
+            ) > "${_agent_out}" || true
+            ;;
+        codex)
+            ( cd "${_work_dir}"
+              if codex --help 2>&1 | grep -q -- '-p'; then
+                  codex -a auto -m "${AGENT_MODEL}" -p "${_prompt}" 2>/dev/null
+              else
+                  printf '%s' "${_prompt}" | codex -a auto -m "${AGENT_MODEL}" 2>/dev/null
+              fi
+            ) > "${_agent_out}" || true
+            ;;
+        *)
+            log_warn "Provider '${_provider}' — plan agent not implemented."
+            log_info "  Switch provider in config/skeleton.yaml to claude, copilot, or codex."
+            rm -f "${_agent_out}"
+            return 1
+            ;;
+    esac
+
+    if [[ ! -s "${_agent_out}" ]]; then
+        rm -f "${_agent_out}"
+        log_error "Agent produced no output."
+        log_info "  Verify AGENT_MODEL is valid and provider CLI is authenticated."
+        return 1
+    fi
+
+    # Extract PLAN.md content: strip any agent preamble before "# PLAN"
+    if grep -q "^# PLAN" "${_agent_out}" 2>/dev/null; then
+        awk '/^# PLAN/,0' "${_agent_out}" > "${_output_path}"
+    else
+        cp "${_agent_out}" "${_output_path}"
+    fi
+    rm -f "${_agent_out}"
+
+    local _task_count
+    _task_count="$(grep -c "^\*\*ID:\*\*\|^### Task" "${_output_path}" 2>/dev/null || echo 0)"
+    log_ok "PLAN.md written: ${_output_path} (${_task_count} tasks)"
+    printf '\n'
+    log_info "  ${BOLD}Review${NC} ${_output_path} — verify task names, deps, file paths"
+    log_info "  ${BOLD}skeleton doctor${NC} — validate project health"
+    log_info "  ${BOLD}skeleton run --dry-run${NC} — preview execution plan"
+    log_info "  ${BOLD}skeleton run --full${NC} — execute all tasks end-to-end"
+    printf '\n'
+}
+
+
 cmd_autoskills() {
     local target_dir="."
     local dry_run=false
@@ -3136,6 +3599,8 @@ cmd_help() {
     add skill <name>          Add a skill to current project
     add agent <name>          Add an agent to current project
     list [skills|agents|templates]  List available resources
+    plan [--from=PLAN]        Bridge a2a-brainstorm plan into skeleton execution format
+    plan [--source=DOC]       Generate docs/PLAN.md from architecture doc (no a2a required)
     sync [--dir=DIR]          Force-sync all skills/agents/scripts from upstream
     autoskills [--dir=DIR]    Auto-detect stack and install matching skills
     version                   Show version
@@ -3144,7 +3609,7 @@ cmd_help() {
   INIT OPTIONS:
     --name=NAME               Project name (default: directory name)
     --dir=DIR                 Target directory (default: ./<name>)
-    --no-agent                Skip Copilot agent spawning
+    --no-agent                Skip agent spawning
 
   UPGRADE OPTIONS:
     --dir=DIR                 Target directory (default: .)
@@ -3156,7 +3621,7 @@ cmd_help() {
     By default, file-modifying commands (init, upgrade, doctor, sync, add,
     autoskills) spawn a Copilot CLI agent for validation or deep health check.
     Use --no-agent to disable agent spawning, or set SKIP_AGENT=true.
-    Agent model: controlled by COPILOT_MODEL env var (default: claude-sonnet-4.6).
+    Agent model: controlled by AGENT_MODEL env var (default: claude-sonnet-4.6).
     Agent logs are saved to .parallel-dev/agent-logs/.
 
   SUPPORTED LANGUAGES:
@@ -3178,11 +3643,14 @@ cmd_help() {
     skeleton add agent test-builder
     skeleton list skills
     skeleton sync --dir=../my-project
+    skeleton plan --from=docs/plan.md           # import a2a-brainstorm output
+    skeleton plan --source=docs/architecture.md # generate without a2a
+    skeleton plan --dry-run
     skeleton autoskills --dir=../existing-project --dry-run
     skeleton autoskills -y
 
   ENVIRONMENT VARIABLES:
-    COPILOT_MODEL             Model for Copilot agent (default: claude-sonnet-4.6)
+    AGENT_MODEL               Model for agent CLI (default: claude-sonnet-4.6)
     SKIP_AGENT                Set to 'true' to disable agent spawning globally
 
 EOF
@@ -3211,6 +3679,7 @@ main() {
         add)        cmd_add "$@" ;;
         list)       cmd_list "$@" ;;
         sync)       cmd_sync "$@" ;;
+        plan)       cmd_plan "$@" ;;
         version)    cmd_version ;;
         help|-h|--help) cmd_help ;;
         *)          die "Unknown command: ${command}\nRun 'skeleton help' for usage." ;;

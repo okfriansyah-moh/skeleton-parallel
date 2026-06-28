@@ -73,7 +73,7 @@ run_driver() {
 
 STAGE: ${stage}
 MANDATORY: Use skills as primary knowledge source (${skills_csv}).
-Follow all constraints in .github/copilot-instructions.md.
+Follow all constraints in AGENTS.md (ARES-composed harness for Codex).
 ${AGENT_WORKSPACE_CONSTRAINT}"
 
     log_step "[${stage}] cli_subscription/codex (model: ${model})"

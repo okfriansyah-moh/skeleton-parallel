@@ -96,7 +96,7 @@ _assemble_system_prompt() {
         "## Stage Context"
         "Stage: ${stage}"
         "${AGENT_WORKSPACE_CONSTRAINT}"
-        "Follow all constraints in .github/copilot-instructions.md if present."
+        "Follow constraints in the ARES-composed harness file for the configured provider (see .ai/manifest.yaml)."
     )
 
     # Print all parts joined with newlines

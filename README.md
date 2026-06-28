@@ -52,6 +52,87 @@ Define work in `docs/PLAN.md`. Let `skeleton run` execute it end-to-end through 
 
 ### Scenarios
 
+**0. Zero to running pipeline — design → plan → execute** · `a2a-brainstorm` + `skeleton plan` + `skeleton run`
+
+skeleton-parallel's natural entry point is a structured architecture document and a task plan. The recommended design-to-execution loop uses two tools in sequence:
+
+| Tool | Phase | Output |
+|------|-------|--------|
+| [a2a-brainstorm](https://github.com/okfriansyah-moh/a2a-brainstorm) | Design | `architecture.md`, `plan.md`, `readme.md` via multi-agent convergence |
+| `skeleton plan --from=plan.md` | Bridge | `docs/PLAN.md` enriched with task IDs, deps, file ownership, acceptance criteria |
+| `skeleton run --full` | Execution | Full 6-stage agentic pipeline through quality gates → PR |
+
+**Real example: idx-signal-system** — self-hosted IDX stock screening, 8 build phases (data layer, scoring engine, backtest, flow/news/sector, Tier B scout, delivery, calibration).
+
+```sh
+# ── Phase 1: Design with a2a-brainstorm ──────────────────────────────────────
+# Already done — a2a produces architecture.md + plan.md from multi-agent session.
+# The plan.md has goals, tech stack, project structure, and task definitions.
+cp ~/Downloads/idx-signal-plan.md idx-signals-systems/docs/plan.md
+
+# ── Phase 2: Bridge to skeleton execution format ──────────────────────────────
+cd idx-signals-systems
+
+# Scaffold the Python backend (additive — won't touch docs/ or existing dirs)
+skeleton init python --role=backend --root=backend/ --name=idx-signals-system
+skeleton init python --role=mcp-server --root=mcp-server/ --name=idx-signals-mcp
+
+# Wire skeleton into this existing project
+skeleton integrate        # imports docs/ → .ai/, wires config + hooks
+
+# Import and enrich the a2a plan into skeleton's execution format
+skeleton plan --from=docs/plan.md
+# reads docs/plan.md (a2a output: 8 tasks with goal, files, validation)
+# → spawns enrichment agent (claude/copilot/codex per config/skeleton.yaml)
+# → adds T-001…T-008 IDs, Depends: chain, Files: paths, Acceptance: checkboxes
+# → writes docs/PLAN.md (skeleton execution format, ready for skeleton run)
+
+# Preview the enriched plan
+skeleton run --dry-run
+
+# ── Phase 3: Validate and execute ─────────────────────────────────────────────
+skeleton doctor
+# → ✓ .ai/manifest.yaml, config/skeleton.yaml, docs/PLAN.md
+# → ✓ provider: claude → CLAUDE.md harness (or copilot/codex per config)
+# → ✓ 8 tasks in docs/PLAN.md
+# → ✓ scripts/hooks/quality-gates.sh
+
+skeleton run 1              # Phase 1 only: data layer (market_data module)
+skeleton run 1 2 3          # Phases 1–3: data + scoring + backtest runner
+skeleton run --parallel 4 5 # Phases 4 & 5 in parallel worktrees
+skeleton run --full         # all 8 phases, quality gates, auto PR
+```
+
+The 8 tasks generated for idx-signal-system:
+
+| Task | Phase | Module | Key Files |
+|------|-------|--------|-----------|
+| T-001 | Data layer | `market_data` | `backend/modules/market_data/fetchers/`, `repository.py` |
+| T-002 | Scoring engine (technicals) | `scoring` | `backend/modules/scoring/technicals.py`, `support_resistance.py` |
+| T-003 | Backtest runner | `backtest` | `backend/modules/backtest/service.py`, `run_backtest_cli.py` |
+| T-004 | Flow + corp actions + sector caps | `scoring` (extend) | `backend/modules/scoring/flow.py`, `sector_cap.py` |
+| T-005 | News/LLM tagging | `news_intelligence` | `backend/modules/news_intelligence/providers/`, `service.py` |
+| T-006 | Tier B scout + promotion | `universe` | `backend/modules/universe/liquidity_ranking.py`, `service.py` |
+| T-007 | Delivery + scheduler | `delivery`, `jobs/` | `backend/modules/delivery/telegram_bot.py`, `jobs/run_morning.py`, `scheduler/` |
+| T-008 | Calibration + Telegram approval | `calibration` | `backend/modules/calibration/service.py`, `telegram_approval.py` |
+
+**No a2a session yet?** Generate from an architecture doc directly:
+
+```sh
+# If you have docs/architecture.md but no a2a plan:
+skeleton plan --source=docs/architecture.md
+# Single-agent generation — good starting point, less architectural depth than a2a
+```
+
+```sh
+# skeleton plan flags
+skeleton plan                                  # auto-detect: a2a plan first, then arch doc
+skeleton plan --from=docs/plan.md              # import a2a-brainstorm output (recommended)
+skeleton plan --source=docs/architecture.md    # generate without a2a
+skeleton plan --from=docs/plan.md --dir=../x   # different project directory
+skeleton plan --dry-run                        # show what would run, skip agent + file write
+```
+
 **1. Start a new project from scratch** · `skeleton init`
 
 Scaffold a language-specific project with modular monolith architecture, `.ai/` knowledge, config, and hooks on day one.
@@ -166,7 +247,7 @@ skeleton integrate --dir=./path/to/repo
 
 **6. Validate project health** · `skeleton doctor`
 
-Check that all required tools, config keys, hooks, and `.ai/` structure are wired correctly.
+Provider-agnostic health check. Validates `.ai/manifest.yaml` (ARES canonical source), `config/skeleton.yaml`, skills/agents from `.ai/` (`.github/` as legacy fallback), pipeline infra, and the harness file for your configured provider (Copilot → `.github/copilot-instructions.md`, Claude → `CLAUDE.md`, Codex → `AGENTS.md`, Cursor → `.cursor/rules/`).
 
 ```sh
 skeleton doctor              # checks current directory
@@ -186,7 +267,7 @@ skeleton upgrade --dir=../my-project --no-agent
 
 **8. Auto-detect stack and install matching skills** · `skeleton autoskills`
 
-Scans the project's language, frameworks, and tools, then installs the matching skill modules into `.github/skills/`.
+Scans the project's language, frameworks, and tools, then installs the matching skill modules into `.ai/skills/` (ARES canonical source).
 
 ```sh
 skeleton autoskills                     # current directory
@@ -197,12 +278,12 @@ skeleton autoskills -y                  # skip confirmation prompts
 
 **9. Add a skill or agent to a project** · `skeleton add`
 
-Install a single named skill or agent from the skeleton-parallel registry into the current project.
+Install a single named skill or agent from the skeleton-parallel registry into `.ai/skills/` or `.ai/agents/` (ARES canonical source). After adding, run `ars compose --target <provider>` to update your provider harness.
 
 ```sh
-skeleton add skill security-audit
+skeleton add skill security-audit    # installs to .ai/skills/security-audit/
 skeleton add skill test-generation
-skeleton add agent test-builder
+skeleton add agent test-builder      # installs to .ai/agents/
 skeleton add agent conflict-resolver
 ```
 
@@ -218,14 +299,33 @@ skeleton list templates
 
 **11. Sync skills and agents from upstream** · `skeleton sync`
 
-Force-sync all skills, agents, and scripts from the skeleton-parallel upstream into the current project.
+Sync all skills, agents, and prompts from the skeleton-parallel upstream into `.ai/` (ARES canonical source), then run `ars compose --target <provider>` to regenerate your provider harness. If `ars` is not installed, skeleton will offer to install it automatically.
 
 ```sh
-skeleton sync                     # current directory
+skeleton sync                     # sync to .ai/ + compose provider harness
 skeleton sync --dir=../my-project
 ```
 
-**12. Regenerate hook templates** · `skeleton hooks regenerate`
+**12. Compose provider harness from `.ai/` knowledge** · `ars compose`
+
+skeleton-parallel uses [ARES](https://github.com/okfriansyah-moh/ares) (AI Repository Standard) as the canonical knowledge layer. Skills, agents, instructions, and prompts live in `.ai/` and are compiled into provider-specific harness files by the `ars` CLI.
+
+```sh
+ars compose --target copilot    # → .github/copilot-instructions.md
+ars compose --target claude     # → CLAUDE.md
+ars compose --target codex      # → AGENTS.md
+ars compose --target cursor     # → .cursor/rules/*.mdc
+```
+
+Switch providers by changing `config/skeleton.yaml` and re-running `ars compose` — your `.ai/` source stays the same. To import existing provider files into `.ai/`:
+
+```sh
+ars import github   # import .github/copilot-instructions.md → .ai/
+ars import claude   # import CLAUDE.md → .ai/
+ars validate        # check .ai/ structure
+```
+
+**13. Regenerate hook templates** · `skeleton hooks regenerate`
 
 Copy the language-appropriate hook templates (`quality-gates.sh`, `acceptance-gates.sh`) into `scripts/hooks/`.
 
@@ -234,7 +334,7 @@ skeleton hooks regenerate
 skeleton hooks regenerate --dir=../my-project
 ```
 
-**13. Check pipeline state** · `skeleton status`
+**15. Check pipeline state** · `skeleton status`
 
 Print the current run state from `.skeleton-dev/run-status.json` — which stages passed, failed, or are in progress.
 
@@ -242,7 +342,7 @@ Print the current run state from `.skeleton-dev/run-status.json` — which stage
 skeleton status
 ```
 
-**14. Clean up worktrees and branches** · `skeleton cleanup`
+**16. Clean up worktrees and branches** · `skeleton cleanup`
 
 Remove all parallel worktrees, stale task branches, and reset `.skeleton-dev/` state after a run.
 
@@ -251,7 +351,7 @@ skeleton cleanup             # prompt before removing
 skeleton cleanup --force     # no prompts
 ```
 
-**15. CI with bounded retries and automatic rollback** · `skeleton run --full`
+**17. CI with bounded retries and automatic rollback** · `skeleton run --full`
 
 Each task gets a git checkpoint before execution. On retry exhaustion the branch rolls back automatically.
 
@@ -262,7 +362,7 @@ skeleton run --full
 # On acceptance fail:     feedback router re-routes to the correct fix path
 ```
 
-**16. Migrate from `run_parallel.sh` + `config/phases.yaml`** · `skeleton run`
+**18. Migrate from `run_parallel.sh` + `config/phases.yaml`** · `skeleton run`
 
 The old phase-based orchestrator still works via a compatibility shim. Migrate when ready.
 
@@ -274,7 +374,7 @@ The old phase-based orchestrator still works via a compatibility shim. Migrate w
 skeleton run 1 2 3
 ```
 
-**17. Check version or get help** · `skeleton version` · `skeleton help`
+**19. Check version or get help** · `skeleton version` · `skeleton help`
 
 ```sh
 skeleton version     # print installed version (derived from git tag)
@@ -353,6 +453,7 @@ skeleton run --full  # execute all pending tasks end-to-end
 | `skeleton run --dry-run`                         | Print execution plan without invoking any agents         |
 | `skeleton run --parallel`                        | One worktree per task (max speed)                        |
 | `skeleton run --sequential`                      | Strict dependency order, single branch (min cost)        |
+| `skeleton plan [--from=PLAN] [--source=DOC]`     | Bridge a2a plan or generate PLAN.md from architecture doc |
 | `skeleton integrate [--dir=DIR]`                 | Brownfield onboarding: import legacy → .ai/ → hooks      |
 | `skeleton doctor [--dir=DIR]`                    | Validate project health; check all required tools        |
 | `skeleton autoskills [--dir=DIR]`                | Detect language and install matching skill modules       |
@@ -374,6 +475,21 @@ skeleton run --full  # execute all pending tasks end-to-end
 | `--mode=MODE`   | auto-detected        | `create` · `overlay` · `respect-existing`                                  |
 | `--force`       | false                | Overwrite existing files in overlay/respect-existing mode                   |
 | `--no-agent`    | false                | Skip post-init Copilot agent spawn                                          |
+
+### `skeleton plan` flags
+
+| Flag              | Default               | Description                                                                     |
+| ----------------- | --------------------- | ------------------------------------------------------------------------------- |
+| `--from=PATH`     | auto-detected         | Import an a2a-brainstorm `plan.md` and enrich it into skeleton execution format |
+| `--source=PATH`   | auto-detected         | Generate PLAN.md from an architecture doc (when no a2a plan is available)       |
+| `--output=PATH`   | `docs/PLAN.md`        | Output path for the generated/enriched plan                                     |
+| `--dir=DIR`       | `.`                   | Target project directory                                                        |
+| `--dry-run`       | false                 | Show what would run; skip agent and file write                                  |
+| `--no-agent`      | false                 | Skip agent spawn (prints manual instructions instead)                           |
+
+Auto-detection order: `docs/plan.md` → `plan.md` → `docs/a2a-plan.md` (a2a import mode), then `docs/architecture.md` → `docs/ARCHITECTURE.md` → `docs/spec.md` → `docs/requirements.md` (generate mode).
+
+The `--from` (a2a-import) mode enriches the a2a plan with `**ID:**` (T-001…), `**Depends:**`, `**Files:**` with concrete paths, and `**Acceptance:**` checkboxes. Content is preserved — only reformatted for `plan_parser.py` compatibility.
 
 ### `skeleton run` flags
 
@@ -470,7 +586,7 @@ scripts/hooks/
 | `bash 4+`                      | All shell scripts                | `brew install bash`                                    |
 | `git 2.5+`                     | Checkpoints, worktrees, PR       | `brew install git`                                     |
 | `python3 3.10+`                | plan_parser.py, detect_legacy.py | `brew install python`                                  |
-| `ars` (ARES CLI)               | Stage −1 knowledge sync          | [install ars](https://github.com/okfriansyah-moh/ares) |
+| `ars` (ARES CLI)               | Knowledge sync + harness compose (`ars compose`, `ars import`, `ars validate`) | [install ars](https://github.com/okfriansyah-moh/ares) |
 | `9router`                      | `driver: router_http`            | `npm install -g @9router/server`                       |
 | `copilot` / `claude` / `codex` | `driver: cli_subscription`       | vendor-specific                                        |
 | `node 22.13+`                  | `driver: sdk_cursor`             | `brew install node`                                    |
@@ -490,7 +606,7 @@ scripts/hooks/
 | `run_parallel.sh cleanup`                 | `skeleton cleanup`                                        |
 | `config/phases.yaml`                      | `docs/PLAN.md` (tasks + dep graph)                        |
 | `MODEL_HEAVY` env                         | `router.combos.heavy` in `config/skeleton.yaml`           |
-| `COPILOT_MODEL` env                       | `execution.cli.model` in `config/skeleton.yaml`           |
+| `COPILOT_MODEL` env                       | `AGENT_MODEL` env (or `execution.cli.model` in `config/skeleton.yaml`) |
 | `MAX_PARALLEL_AGENTS` env                 | `execution.max_parallel_agents` in `config/skeleton.yaml` |
 
 See [docs/PARALLEL_DEV.md §11](docs/PARALLEL_DEV.md) for the full migration guide.
@@ -532,7 +648,7 @@ See [docs/PARALLEL_DEV.md §11](docs/PARALLEL_DEV.md) for the full migration gui
 
 ### Skills (28)
 
-`.github/skills/<name>/SKILL.md` — loaded on-demand to minimize token usage.
+`.ai/skills/<name>/SKILL.md` — canonical source (ARES). Use `ars compose --target <provider>` to compile into your provider's harness. Loaded on-demand to minimize token usage.
 
 **Always-active:**
 
