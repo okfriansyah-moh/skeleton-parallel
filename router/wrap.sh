@@ -54,65 +54,64 @@ router_install() {
         return 0
     fi
 
-    # Read custom npm package / docker image from pin file (if set by maintainer)
-    local custom_npm="" custom_docker=""
+    # Read npm package / docker image from pin file; default to known package name
+    local npm_pkg="9router" docker_image=""
     if command -v python3 &>/dev/null && [[ -f "${_PIN_FILE}" ]]; then
-        custom_npm="$(python3 -c "
-import json, sys
+        local _pin_npm _pin_docker
+        _pin_npm="$(python3 -c "
+import json
 d = json.load(open('${_PIN_FILE}'))
-v = d.get('npm', '')
-# Ignore the placeholder value written by earlier versions of skeleton
+v = d.get('npm', '').strip()
 if v and v != '@9router/server':
     print(v)
 " 2>/dev/null || true)"
-        custom_docker="$(python3 -c "
+        _pin_docker="$(python3 -c "
 import json
 d = json.load(open('${_PIN_FILE}'))
-v = d.get('docker', '')
+v = d.get('docker', '').strip()
 if v and v != '9router/server:latest':
     print(v)
 " 2>/dev/null || true)"
+        [[ -n "${_pin_npm}" ]]    && npm_pkg="${_pin_npm}"
+        [[ -n "${_pin_docker}" ]] && docker_image="${_pin_docker}"
     fi
 
-    # npm install — only when a real package name is pinned
-    if [[ -n "${custom_npm}" ]] && command -v npm &>/dev/null; then
-        log_info "[router] Installing via npm: ${custom_npm}"
-        if npm install -g "${custom_npm}"; then
-            log_ok "[router] 9router installed via npm"
+    # npm install (preferred — real package: github.com/decolua/9router)
+    if command -v npm &>/dev/null; then
+        log_info "[router] Installing via npm: ${npm_pkg}"
+        if npm install -g "${npm_pkg}"; then
+            log_ok "[router] 9router installed (npm install -g ${npm_pkg})"
             _generate_inject_env_stub
             return 0
         fi
         log_warn "[router] npm install failed, trying next method..."
+    else
+        log_warn "[router] npm not found — install Node.js first: https://nodejs.org"
     fi
 
-    # Docker — only when a real image is pinned
-    if [[ -n "${custom_docker}" ]] && command -v docker &>/dev/null; then
-        log_info "[router] Pulling docker image: ${custom_docker}"
-        if docker pull "${custom_docker}"; then
-            log_ok "[router] 9router docker image pulled: ${custom_docker}"
+    # Docker fallback (only if an image is pinned in 9router-pin.json)
+    if [[ -n "${docker_image}" ]] && command -v docker &>/dev/null; then
+        log_info "[router] Pulling docker image: ${docker_image}"
+        if docker pull "${docker_image}"; then
+            log_ok "[router] 9router docker image pulled: ${docker_image}"
             _generate_inject_env_stub
             return 0
         fi
         log_warn "[router] docker pull failed"
     fi
 
-    # Nothing worked — guide the user
-    log_error "[router] 9router not found. Manual install required."
+    # Nothing worked
+    log_error "[router] 9router could not be installed automatically."
     echo ""
-    echo "  9router is a local OpenAI-compatible proxy daemon (port 20128)."
-    echo "  Install it from your provider's site or release page, then add"
-    echo "  the binary to your PATH."
+    echo "  Manual install:"
+    echo "    npm install -g 9router"
+    echo "    9router                  # starts the daemon"
     echo ""
-    echo "  Once installed:"
+    echo "  GitHub: https://github.com/decolua/9router"
+    echo ""
+    echo "  Once installed, run:"
     echo "    skeleton router start"
     echo "    skeleton router status"
-    echo ""
-    echo "  To pin a specific npm package or docker image, edit:"
-    echo "    router/9router-pin.json   →  { \"npm\": \"pkg\", \"docker\": \"image:tag\" }"
-    echo "  Then re-run: skeleton router install"
-    echo ""
-    echo "  If 9router is already running at localhost:20128, skip install:"
-    echo "    skeleton router health"
     return 1
 }
 

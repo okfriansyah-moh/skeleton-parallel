@@ -86,7 +86,7 @@ skeleton init python --role=mcp-server --root=mcp-server/ --name=idx-signals-mcp
 skeleton integrate
 
 # ── Phase 3: Set up 9router ───────────────────────────────────────────────────
-skeleton router install   # detect or guide install of 9router binary
+skeleton router install   # npm install -g 9router (github.com/decolua/9router)
 skeleton router start     # start daemon on localhost:20128
 skeleton router status    # verify: Running: yes, Health: OK
 
@@ -263,7 +263,7 @@ skeleton run --dry-run --parallel
 9router is a local daemon that proxies agent calls through a single OpenAI-compatible endpoint, enabling quota rotation, provider fallback, and OAuth token management. Required only when `driver: router_http` in `config/skeleton.yaml`.
 
 ```sh
-skeleton router install   # detect or guide install of 9router binary
+skeleton router install   # npm install -g 9router (github.com/decolua/9router)
 skeleton router start     # start daemon on localhost:20128
 skeleton router status    # verify: Running: yes, Health: OK
 skeleton router oauth     # print OAuth setup guide for each provider
@@ -647,7 +647,7 @@ scripts/hooks/
 | `git 2.5+`                     | Checkpoints, worktrees, PR       | `brew install git`                                     |
 | `python3 3.10+`                | plan_parser.py, detect_legacy.py | `brew install python`                                  |
 | `ars` (ARES CLI)               | Knowledge sync + harness compose (`ars compose`, `ars import`, `ars validate`) | [install ars](https://github.com/okfriansyah-moh/ares) |
-| `9router`                      | `driver: router_http`            | Install binary → PATH; run `skeleton router install`   |
+| `9router`                      | `driver: router_http`            | `npm install -g 9router` ([decolua/9router](https://github.com/decolua/9router)) |
 | `copilot` / `claude` / `codex` | `driver: cli_subscription`       | vendor-specific                                        |
 | `node 22.13+`                  | `driver: sdk_cursor`             | `brew install node`                                    |
 | `gh`                           | Stage [6] PR creation            | `brew install gh && gh auth login`                     |

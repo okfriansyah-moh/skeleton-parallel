@@ -1,6 +1,6 @@
 {
-  "_note": "Set 'npm' or 'docker' to a real package/image to enable automatic install via 'skeleton router install'. Leave both blank to use manual install (binary must be in PATH).",
-  "npm": "",
+  "_note": "https://github.com/decolua/9router — update npm/docker when a new release ships",
+  "npm": "9router",
   "docker": "",
   "port": 20128,
   "health_endpoint": "http://localhost:20128/health"
