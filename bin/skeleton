@@ -1918,9 +1918,6 @@ cmd_doctor() {
     local issues=0
     local warnings=0
 
-    # ── Framework files ───────────────────────────────────────────────────
-    log_step "Checking framework files..."
-
     _check_exists() {
         local path="$1" label="$2" severity="${3:-error}"
         if [[ -e "${target_dir}/${path}" ]]; then
@@ -1928,22 +1925,199 @@ cmd_doctor() {
         elif [[ "${severity}" == "warn" ]]; then
             log_warn "${label} — MISSING (optional)"
             ((warnings++))
+        elif [[ "${severity}" == "info" ]]; then
+            log_info "${label} — not present"
         else
             log_error "${label} — MISSING"
             ((issues++))
         fi
     }
 
-    _check_exists ".github/copilot-instructions.md" "copilot-instructions.md"
-    _check_exists "scripts/run_parallel.sh" "run_parallel.sh"
-    _check_exists "config/phases.yaml" "phases.yaml"
-    _check_exists ".github/skills" "Skills directory"
-    _check_exists ".github/agents" "Agents directory"
-    _check_exists ".github/prompts" "Prompts directory" "warn"
+    # ── Section 1: Identity & Runtime Config ──────────────────────────────
+    log_step "Checking identity & runtime config..."
 
-    # ── Skills inventory ──────────────────────────────────────────────────
+    if [[ -f "${target_dir}/.ai/manifest.yaml" ]]; then
+        log_ok ".ai/manifest.yaml"
+    else
+        log_error ".ai/manifest.yaml — MISSING (run: ars init  or  skeleton integrate)"
+        (( issues++ ))
+    fi
+
+    if [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
+        if bash -c "
+            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
+            SKELETON_DRIVER='' load_config '${target_dir}' 2>/dev/null" 2>/dev/null; then
+            log_ok "config/skeleton.yaml"
+        else
+            log_error "config/skeleton.yaml — present but not loadable (run: skeleton integrate)"
+            (( issues++ ))
+        fi
+    else
+        log_error "config/skeleton.yaml — MISSING (run: skeleton integrate)"
+        (( issues++ ))
+    fi
+
+    if [[ -f "${target_dir}/docs/PLAN.md" ]]; then
+        log_ok "docs/PLAN.md"
+    else
+        log_error "docs/PLAN.md — MISSING (canonical work source)"
+        (( issues++ ))
+    fi
+
+    # ── Section 2: Agentic Knowledge Plane ────────────────────────────────
     echo ""
-    log_step "Checking skills..."
+    log_step "Checking agentic knowledge plane..."
+
+    local agents_dir="" skills_dir="" knowledge_source=""
+    if [[ -d "${target_dir}/.ai/agents" ]]; then
+        agents_dir="${target_dir}/.ai/agents"
+        knowledge_source=".ai"
+    elif [[ -d "${target_dir}/.github/agents" ]]; then
+        agents_dir="${target_dir}/.github/agents"
+        knowledge_source=".github"
+    fi
+    if [[ -d "${target_dir}/.ai/skills" ]]; then
+        skills_dir="${target_dir}/.ai/skills"
+    elif [[ -d "${target_dir}/.github/skills" ]]; then
+        skills_dir="${target_dir}/.github/skills"
+    fi
+
+    if [[ -n "${agents_dir}" ]]; then
+        log_ok "Agents directory: ${agents_dir#${target_dir}/}"
+    else
+        log_error "No agents directory found (expected .ai/agents/ or .github/agents/)"
+        (( issues++ ))
+    fi
+    if [[ -n "${skills_dir}" ]]; then
+        log_ok "Skills directory: ${skills_dir#${target_dir}/}"
+    else
+        log_error "No skills directory found (expected .ai/skills/ or .github/skills/)"
+        (( issues++ ))
+    fi
+    if [[ "${knowledge_source}" == ".github" ]]; then
+        log_warn "Skills/agents live in .github/ (legacy) — run: ars compose to migrate to .ai/"
+        (( warnings++ ))
+    fi
+    _check_exists ".github/prompts" ".github/prompts/ (prompts directory)" "warn"
+
+    # ── Section 3: Pipeline Infrastructure ────────────────────────────────
+    echo ""
+    log_step "Checking pipeline infrastructure..."
+    _check_exists "scripts/hooks/quality-gates.sh" "scripts/hooks/quality-gates.sh"
+    if [[ -f "${target_dir}/scripts/run_parallel.sh" ]]; then
+        log_info "scripts/run_parallel.sh present (deprecated shim — safe to keep)"
+    fi
+
+    # ── Section 4: Provider-Specific Harness ──────────────────────────────
+    echo ""
+    log_step "Checking provider harness..."
+
+    local _drv="" _provider=""
+    if [[ -f "${SKELETON_ROOT}/scripts/lib/config.sh" ]]; then
+        local _cfg_out
+        _cfg_out="$(bash -c "
+            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
+            load_config '${target_dir}' 2>/dev/null
+            echo \"driver=\${SKELETON_DRIVER:-cli_subscription}\"
+            echo \"provider=\${SKELETON_PROVIDER:-}\"" 2>/dev/null || true)"
+        _drv="$(echo "${_cfg_out}"      | grep '^driver='   | cut -d= -f2)"
+        _provider="$(echo "${_cfg_out}" | grep '^provider=' | cut -d= -f2)"
+    fi
+    _drv="${_drv:-cli_subscription}"
+    # Infer provider from config/skeleton.yaml if not set via SKELETON_PROVIDER
+    if [[ -z "${_provider}" ]] && [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
+        _provider="$(grep -E '^\s*provider\s*:' "${target_dir}/config/skeleton.yaml" \
+            2>/dev/null | head -1 | sed 's/.*://;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
+    fi
+    _provider="${_provider:-copilot}"
+
+    log_info "driver=${_drv}  provider=${_provider}"
+
+    case "${_provider}" in
+        copilot)
+            _check_exists ".github/copilot-instructions.md" \
+                ".github/copilot-instructions.md (Copilot harness)" "warn"
+            if command -v copilot &>/dev/null; then
+                log_ok "copilot CLI found: $(command -v copilot)"
+            else
+                log_warn "copilot CLI — not found (optional; needed for driver=cli_subscription)"
+                (( warnings++ ))
+            fi
+            ;;
+        claude)
+            _check_exists "CLAUDE.md" "CLAUDE.md (Claude Code harness)" "warn"
+            if command -v claude &>/dev/null; then
+                log_ok "claude CLI found: $(command -v claude)"
+            else
+                log_warn "claude CLI — not found"
+                (( warnings++ ))
+            fi
+            ;;
+        codex)
+            _check_exists "AGENTS.md" "AGENTS.md (Codex harness)" "warn"
+            if command -v codex &>/dev/null; then
+                log_ok "codex CLI found: $(command -v codex)"
+            else
+                log_warn "codex CLI — not found"
+                (( warnings++ ))
+            fi
+            ;;
+        cursor)
+            _check_exists ".cursor/rules" ".cursor/rules/ (Cursor harness)" "warn"
+            ;;
+        antigravity)
+            _check_exists ".antigravity" ".antigravity/ (Antigravity harness)" "warn"
+            ;;
+        *)
+            log_info "Provider '${_provider}' — no harness check defined"
+            ;;
+    esac
+
+    case "${_drv}" in
+        router_http)
+            if command -v node &>/dev/null; then
+                log_ok "Node.js $(node --version 2>/dev/null) (required for router_http / 9router)"
+            else
+                log_warn "Node.js — not found (needed for driver=router_http)"
+                (( warnings++ ))
+            fi
+            ;;
+        sdk_cursor)
+            if command -v node &>/dev/null; then
+                local _nv; _nv="$(node --version 2>/dev/null | sed 's/v//')"
+                local _nmaj; _nmaj="$(echo "${_nv}" | cut -d. -f1)"
+                if [[ "${_nmaj:-0}" -ge 22 ]]; then
+                    log_ok "Node.js v${_nv} (≥22.13 satisfied for sdk_cursor)"
+                else
+                    log_error "Node.js v${_nv} — need ≥22.13 for driver=sdk_cursor"
+                    (( issues++ ))
+                fi
+            else
+                log_error "Node.js — NOT FOUND (required for driver=sdk_cursor)"
+                (( issues++ ))
+            fi
+            if [[ -z "${CURSOR_API_KEY:-}" ]]; then
+                log_error "CURSOR_API_KEY — not set (required for driver=sdk_cursor)"
+                (( issues++ ))
+            else
+                log_ok "CURSOR_API_KEY set"
+            fi
+            ;;
+    esac
+
+    # ── Section 5: ARES Tooling ────────────────────────────────────────────
+    echo ""
+    log_step "Checking ARES tooling..."
+    if command -v ars &>/dev/null; then
+        log_ok "ars CLI found: $(command -v ars)"
+    else
+        log_warn "ars CLI — not found (install: https://github.com/okfriansyah-moh/ares)"
+        (( warnings++ ))
+    fi
+
+    # ── Section 6: Skills & Agents Inventory ──────────────────────────────
+    echo ""
+    log_step "Checking skills inventory..."
     local core_skills=("dto" "pipeline" "modularity" "determinism" "idempotency"
                        "failure" "config-validation" "code-quality" "coding-standards"
                        "database-portability" "docs-sync" "conflict-resolution"
@@ -1956,7 +2130,14 @@ cmd_doctor() {
     local skill_count=0
     local missing_skills=()
     for skill in "${core_skills[@]}"; do
-        if [[ -f "${target_dir}/.github/skills/${skill}/SKILL.md" ]]; then
+        local _skill_found=false
+        if [[ -n "${skills_dir}" ]]; then
+            if [[ -f "${skills_dir}/${skill}/SKILL.md" ]] || \
+               [[ -f "${skills_dir}/${skill}.md" ]]; then
+                _skill_found=true
+            fi
+        fi
+        if [[ "${_skill_found}" == "true" ]]; then
             skill_count=$(( skill_count + 1 ))
         else
             missing_skills+=("${skill}")
@@ -1968,9 +2149,8 @@ cmd_doctor() {
         ((warnings++))
     fi
 
-    # ── Agents inventory ──────────────────────────────────────────────────
     echo ""
-    log_step "Checking agents..."
+    log_step "Checking agents inventory..."
     local core_agents=("phase-builder" "dto-guardian" "integration" "refactor"
                        "orchestrator" "module-builder" "conflict-resolver"
                        "merge-reviewer" "task-sync" "scaffold" "security-auditor"
@@ -1978,7 +2158,15 @@ cmd_doctor() {
     local agent_count=0
     local missing_agents=()
     for agent in "${core_agents[@]}"; do
-        if [[ -f "${target_dir}/.github/agents/${agent}.agent.md" ]]; then
+        local _agent_found=false
+        if [[ -n "${agents_dir}" ]]; then
+            if [[ -f "${agents_dir}/${agent}.agent.md" ]] || \
+               [[ -f "${agents_dir}/${agent}.md" ]] || \
+               [[ -d "${agents_dir}/${agent}" ]]; then
+                _agent_found=true
+            fi
+        fi
+        if [[ "${_agent_found}" == "true" ]]; then
             agent_count=$(( agent_count + 1 ))
         else
             missing_agents+=("${agent}")
@@ -1990,7 +2178,7 @@ cmd_doctor() {
         ((warnings++))
     fi
 
-    # ── Project structure ─────────────────────────────────────────────────
+    # ── Section 7: Project Structure ──────────────────────────────────────
     echo ""
     log_step "Checking project structure..."
     local detected_lang
@@ -2003,7 +2191,7 @@ cmd_doctor() {
         ((warnings++))
     fi
 
-    # ── Doc templates ─────────────────────────────────────────────────────
+    # ── Section 8: Doc Templates ───────────────────────────────────────────
     echo ""
     log_step "Checking documentation..."
     local doc_files=("architecture.md" "implementation_roadmap.md" "orchestrator_spec.md"
@@ -2012,7 +2200,7 @@ cmd_doctor() {
         _check_exists "docs/${doc}" "docs/${doc}" "warn"
     done
 
-    # ── Git health ────────────────────────────────────────────────────────
+    # ── Section 9: Git Health ──────────────────────────────────────────────
     echo ""
     log_step "Checking Git setup..."
     if [[ -d "${target_dir}/.git" ]]; then
@@ -2020,69 +2208,6 @@ cmd_doctor() {
     else
         log_warn "Not a Git repository"
         ((warnings++))
-    fi
-
-    # ── v1.0 checks (new in v1.0) ─────────────────────────────────────────
-    echo ""
-    log_step "Checking v1.0 components..."
-
-    # PLAN.md presence
-    _check_exists "docs/PLAN.md" "docs/PLAN.md (task plan)" "warn"
-
-    # .ai/manifest.yaml
-    if [[ -f "${target_dir}/.ai/manifest.yaml" ]]; then
-        log_ok ".ai/manifest.yaml present"
-    else
-        log_warn ".ai/manifest.yaml — MISSING (run: skeleton integrate)"
-        (( warnings++ ))
-    fi
-
-    # config/skeleton.yaml
-    if [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
-        if bash -c "
-            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
-            SKELETON_DRIVER='' load_config '${target_dir}' 2>/dev/null" 2>/dev/null; then
-            log_ok "config/skeleton.yaml present and loadable"
-        else
-            log_warn "config/skeleton.yaml — could not load (run: skeleton integrate)"
-            (( warnings++ ))
-        fi
-    else
-        log_warn "config/skeleton.yaml — MISSING (run: skeleton integrate)"
-        (( warnings++ ))
-    fi
-
-    # ars CLI
-    if command -v ars &>/dev/null; then
-        log_ok "ars CLI found: $(command -v ars)"
-    else
-        log_warn "ars CLI — NOT FOUND (optional; install: https://github.com/okfriansyah-moh/ares)"
-        (( warnings++ ))
-    fi
-
-    # Node.js version check (required only for sdk_cursor driver)
-    if [[ -f "${SKELETON_ROOT}/scripts/lib/config.sh" ]]; then
-        local _drv
-        _drv="$(bash -c "
-            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
-            load_config '${target_dir}' 2>/dev/null
-            echo \"\${SKELETON_DRIVER:-cli_subscription}\"" 2>/dev/null || echo "cli_subscription")"
-        if [[ "${_drv}" == "sdk_cursor" ]]; then
-            if command -v node &>/dev/null; then
-                log_ok "Node.js $(node --version 2>/dev/null) (required for sdk_cursor)"
-            else
-                log_error "Node.js — NOT FOUND (required for driver=sdk_cursor)"
-                (( issues++ ))
-            fi
-        fi
-    fi
-
-    # Driver binary (advisory)
-    if command -v copilot &>/dev/null; then
-        log_ok "Copilot CLI found (cli_subscription/copilot driver)"
-    else
-        log_warn "Copilot CLI — not found (optional; needed for driver=cli_subscription/copilot)"
-        (( warnings++ ))
     fi
 
     # ── Summary ───────────────────────────────────────────────────────────
@@ -2097,17 +2222,18 @@ cmd_doctor() {
     fi
     echo ""
 
-    # ── Deep agent health check ───────────────────────────────────────────
-    if [[ ${issues} -gt 0 ]] || [[ ${warnings} -gt 0 ]]; then
-        log_step "Spawning Copilot agent for deep health check and auto-fix..."
-        _spawn_copilot_agent "${target_dir}" "doctor" \
-            "Run a deep health check on this project. Found ${issues} issues and ${warnings} warnings. Validate and fix: 1) All module boundaries (no cross-module imports). 2) DTO contracts are immutable and properly defined in contracts/. 3) Database adapter is the sole DB access point (no raw SQL in modules). 4) All config is YAML-driven (no hardcoded values in code). 5) Tests are deterministic and network-free. 6) All missing skills, agents, or prompts should be installed. 7) Missing docs templates should be created from skeleton-parallel defaults. Fix all issues found. After fixing, commit with message 'chore: doctor auto-fix'." \
-            "doctor-deep-check"
-    else
-        # Background validation even when checks pass
-        _spawn_copilot_agent_bg "${target_dir}" "doctor" \
-            "All basic checks passed. Run a deep validation: 1) Verify module boundaries. 2) Check DTO immutability. 3) Validate database adapter isolation. 4) Check for hardcoded config values. 5) Ensure parallel dev readiness (phases.yaml + run_parallel.sh). Report findings in .parallel-dev/agent-logs/." \
-            "doctor-bg-validation"
+    # ── Deep agent health check (Copilot only) ────────────────────────────
+    if [[ "${_provider}" == "copilot" ]]; then
+        if [[ ${issues} -gt 0 ]] || [[ ${warnings} -gt 0 ]]; then
+            log_step "Spawning Copilot agent for deep health check and auto-fix..."
+            _spawn_copilot_agent "${target_dir}" "doctor" \
+                "Run a deep health check on this project. Found ${issues} issues and ${warnings} warnings. Validate and fix: 1) All module boundaries (no cross-module imports). 2) DTO contracts are immutable and properly defined in contracts/. 3) Database adapter is the sole DB access point (no raw SQL in modules). 4) All config is YAML-driven (no hardcoded values in code). 5) Tests are deterministic and network-free. 6) All missing skills, agents, or prompts should be installed. 7) Missing docs templates should be created from skeleton-parallel defaults. Fix all issues found. After fixing, commit with message 'chore: doctor auto-fix'." \
+                "doctor-deep-check"
+        else
+            _spawn_copilot_agent_bg "${target_dir}" "doctor" \
+                "All basic checks passed. Run a deep validation: 1) Verify module boundaries. 2) Check DTO immutability. 3) Validate database adapter isolation. 4) Check for hardcoded config values. 5) Ensure parallel dev readiness. Report findings in .parallel-dev/agent-logs/." \
+                "doctor-bg-validation"
+        fi
     fi
 
     return ${issues}
