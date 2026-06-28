@@ -70,32 +70,50 @@ skeleton-parallel's natural entry point is a structured architecture document an
 # The plan.md has goals, tech stack, project structure, and task definitions.
 cp ~/Downloads/idx-signal-plan.md idx-signals-systems/docs/plan.md
 
-# ── Phase 2: Bridge to skeleton execution format ──────────────────────────────
+# ── Phase 2: Scaffold + wire skeleton ────────────────────────────────────────
 cd idx-signals-systems
 
 # Scaffold the Python backend (additive — won't touch docs/ or existing dirs)
 skeleton init python --role=backend --root=backend/ --name=idx-signals-system
 skeleton init python --role=mcp-server --root=mcp-server/ --name=idx-signals-mcp
 
-# Wire skeleton into this existing project
-skeleton integrate        # imports docs/ → .ai/, wires config + hooks
+# Wire skeleton at the project root: .ai/, config/skeleton.yaml, hooks
+skeleton integrate
 
+# ── Phase 3: Set up 9router ───────────────────────────────────────────────────
+skeleton router install   # install via npm (requires Node 22.13+)
+skeleton router start     # start daemon on localhost:20128
+skeleton router status    # verify: Running: yes, Health: OK
+
+# Open http://localhost:20128 → Connections → add Claude → copy token:
+# router/inject-env.sh  (chmod 600, never commit)
+# export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+# export ANTHROPIC_API_KEY="<your-key>"
+
+skeleton router health    # confirm daemon is responding
+
+# Set driver in config/skeleton.yaml:
+# execution:
+#   driver: router_http
+# router:
+#   combo: project-default
+
+# ── Phase 4: Generate docs/PLAN.md ───────────────────────────────────────────
 # Import and enrich the a2a plan into skeleton's execution format
 skeleton plan --from=docs/plan.md
 # reads docs/plan.md (a2a output: 8 tasks with goal, files, validation)
-# → spawns enrichment agent (claude/copilot/codex per config/skeleton.yaml)
+# → spawns enrichment agent via 9router
 # → adds T-001…T-008 IDs, Depends: chain, Files: paths, Acceptance: checkboxes
 # → writes docs/PLAN.md (skeleton execution format, ready for skeleton run)
 
-# Preview the enriched plan
-skeleton run --dry-run
-
-# ── Phase 3: Validate and execute ─────────────────────────────────────────────
+# ── Phase 5: Validate and execute ────────────────────────────────────────────
 skeleton doctor
 # → ✓ .ai/manifest.yaml, config/skeleton.yaml, docs/PLAN.md
-# → ✓ provider: claude → CLAUDE.md harness (or copilot/codex per config)
+# → ✓ driver: router_http → 9router health OK
 # → ✓ 8 tasks in docs/PLAN.md
 # → ✓ scripts/hooks/quality-gates.sh
+
+skeleton run --dry-run      # preview full execution plan before touching code
 
 skeleton run 1              # Phase 1 only: data layer (market_data module)
 skeleton run 1 2 3          # Phases 1–3: data + scoring + backtest runner
