@@ -328,18 +328,30 @@ get_available_agents() {
 # ═════════════════════════════════════════════════════════════════════════════
 cmd_init() {
     local language=""
+    local language=""
     local project_name=""
     local target_dir=""
+    local init_mode=""
+    local init_role=""
+    local init_root=""
+    local force_overwrite=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --name=*) project_name="${1#*=}"; shift ;;
-            --dir=*)  target_dir="${1#*=}"; shift ;;
-            --name)   project_name="${2}"; shift 2 ;;
-            --dir)    target_dir="${2}"; shift 2 ;;
-            --no-agent) SKIP_AGENT=true; shift ;;
-            -*)       die "Unknown option: $1" ;;
+            --name=*)    project_name="${1#*=}"; shift ;;
+            --dir=*)     target_dir="${1#*=}"; shift ;;
+            --name)      project_name="${2}"; shift 2 ;;
+            --dir)       target_dir="${2}"; shift 2 ;;
+            --no-agent)  SKIP_AGENT=true; shift ;;
+            --mode=*)    init_mode="${1#*=}"; shift ;;
+            --role=*)    init_role="${1#*=}"; shift ;;
+            --root=*)    init_root="${1#*=}"; init_root="${init_root%/}"; shift ;;
+            --mode)      init_mode="${2}"; shift 2 ;;
+            --role)      init_role="${2}"; shift 2 ;;
+            --root)      init_root="${2%/}"; shift 2 ;;
+            --force)     force_overwrite=true; shift ;;
+            -*)          die "Unknown option: $1" ;;
             *)
                 if [[ -z "${language}" ]]; then
                     language="$1"
@@ -364,10 +376,18 @@ cmd_init() {
         die "Unsupported language: ${language}\nSupported: ${SUPPORTED_LANGUAGES[*]}"
     fi
 
-    # Default project name from current directory
+    # Validate --mode value
+    case "${init_mode}" in
+        ""|create|overlay|respect-existing) ;;
+        *) die "Unknown --mode '${init_mode}'. Valid: create, overlay, respect-existing" ;;
+    esac
+
+    # Default project name
     if [[ -z "${project_name}" ]]; then
         if [[ -n "${target_dir}" ]]; then
             project_name="$(basename "${target_dir}")"
+        elif [[ -n "${init_role}" ]]; then
+            project_name="$(basename "$(pwd)")"
         else
             read -rp "$(echo -e "${CYAN}Project name: ${NC}")" project_name
             [[ -z "${project_name}" ]] && die "Project name is required"
@@ -379,11 +399,20 @@ cmd_init() {
 
     # Default target directory
     if [[ -z "${target_dir}" ]]; then
-        target_dir="./${project_name}"
+        if [[ -n "${init_role}" ]]; then
+            target_dir="."
+        else
+            target_dir="./${project_name}"
+        fi
     fi
 
     # Resolve absolute path
-    target_dir="$(cd "$(dirname "${target_dir}")" 2>/dev/null && pwd)/$(basename "${target_dir}")" || target_dir="$(pwd)/${project_name}"
+    target_dir="$(cd "$(dirname "${target_dir}")" 2>/dev/null && pwd)/$(basename "${target_dir}")" \
+        || target_dir="$(pwd)/${project_name}"
+
+    # Resolve effective root (where language template files land)
+    local effective_root
+    effective_root="$(resolve_init_root "${target_dir}" "${init_role}" "${init_root}")"
 
     echo ""
     echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
@@ -393,39 +422,109 @@ cmd_init() {
     log_info "Language:     ${BOLD}${language}${NC}"
     log_info "Project:      ${BOLD}${project_name}${NC}"
     log_info "Directory:    ${BOLD}${target_dir}${NC}"
+    [[ -n "${init_role}" ]] && log_info "Role:         ${BOLD}${init_role}${NC}"
+    [[ "${effective_root}" != "${target_dir}" ]] && \
+        log_info "Root:         ${BOLD}${effective_root}${NC}"
     echo ""
 
-    if [[ -d "${target_dir}" ]]; then
-        local file_count
-        file_count="$(find "${target_dir}" -maxdepth 1 -not -name '.' | wc -l | tr -d ' ')"
-        if [[ "${file_count}" -gt 0 ]]; then
-            log_warn "Directory ${target_dir} already exists and is not empty."
-            confirm "Overwrite?" || die "Aborted."
+    # ── Mode detection ────────────────────────────────────────────────────
+    if [[ -z "${init_mode}" ]]; then
+        init_mode="$(detect_init_mode "${target_dir}" "${effective_root}" "${init_role}")"
+        log_info "Mode (auto):  ${BOLD}${init_mode}${NC}"
+    else
+        log_info "Mode:         ${BOLD}${init_mode}${NC}"
+    fi
+    echo ""
+
+    # In create mode, guard against non-empty target (legacy behavior preserved)
+    if [[ "${init_mode}" == "create" ]]; then
+        if [[ -d "${effective_root}" ]]; then
+            local file_count
+            file_count="$(find "${effective_root}" -maxdepth 1 -not -name '.' \
+                | wc -l | tr -d ' ')"
+            if [[ "${file_count}" -gt 0 ]] && [[ "${force_overwrite}" != "true" ]]; then
+                log_warn "Directory ${effective_root} already exists and is not empty."
+                confirm "Overwrite? (or use --mode=overlay / --mode=respect-existing)" \
+                    || die "Aborted."
+            fi
         fi
     fi
 
-    mkdir -p "${target_dir}"
+    mkdir -p "${effective_root}"
 
-    # ── Step 1: Copy common files ─────────────────────────────────────────
+    # ── Step 1: Common files (always at project root, always idempotent) ──
     log_step "Copying common framework files..."
-    _copy_common "${target_dir}"
+    _copy_common_overlay "${target_dir}" "${force_overwrite}"
 
-    # ── Step 2: Copy language-specific template ───────────────────────────
-    log_step "Applying ${language} template..."
+    # ── Step 2: Language template (mode-aware, placed under effective root) ─
+    log_step "Applying ${language} template to ${effective_root}..."
     local lang_template="${TEMPLATES_DIR}/${language}"
-    if [[ -d "${lang_template}" ]]; then
-        cp -R "${lang_template}/." "${target_dir}/"
-    else
+    if [[ ! -d "${lang_template}" ]]; then
         die "Template not found: ${lang_template}"
     fi
 
-    # ── Step 3: Substitute placeholders ───────────────────────────────────
+    # Collect declared architecture paths for respect-existing mode
+    local arch_paths_file
+    arch_paths_file="$(mktemp)"
+    read_architecture_paths "${target_dir}" > "${arch_paths_file}"
+    local arch_paths_count
+    arch_paths_count="$(wc -l < "${arch_paths_file}" | tr -d ' ')"
+    if [[ "${arch_paths_count}" -gt 0 ]]; then
+        log_info "  Architecture declares ${arch_paths_count} path(s) — will be respected"
+    fi
+
+    # Determine if the role root itself is architecture-declared.
+    # If so, all structure files placed under it would conflict with the
+    # architecture's intended internal layout — skip them all.
+    local role_arch_owned=false
+    if [[ -n "${init_role}" ]] && [[ -s "${arch_paths_file}" ]]; then
+        local role_root_name
+        role_root_name="$(basename "${effective_root}")"
+        if grep -qFx "${role_root_name}" "${arch_paths_file}" 2>/dev/null; then
+            role_arch_owned=true
+            log_info "  Role root '${role_root_name}' is architecture-declared — structure files will be skipped"
+        fi
+    fi
+
+    local copied=0 skipped=0
+    while IFS= read -r -d '' src_file; do
+        local rel="${src_file#${lang_template}/}"
+        local dest_file="${effective_root}/${rel}"
+        if safe_copy_file \
+            "${src_file}" "${dest_file}" \
+            "${init_mode}" "${force_overwrite}" \
+            "${arch_paths_file}" "${rel}" \
+            "${role_arch_owned}"; then
+            (( copied++ )) || true
+        else
+            (( skipped++ )) || true
+        fi
+    done < <(find "${lang_template}" -type f -print0)
+    rm -f "${arch_paths_file}"
+    log_ok "Template applied: ${copied} file(s) written, ${skipped} skipped"
+
+    # ── Step 3: Substitute placeholders (scoped to effective root) ────────
     log_step "Customizing project files..."
-    substitute_all "${target_dir}" "${project_name}"
+    substitute_all "${effective_root}" "${project_name}"
 
     # ── Step 3.5: Write v1.0 config files ─────────────────────────────────
     log_step "Writing v1.0 configuration files..."
-    _write_v1_config "${target_dir}" "${project_name}" "${language}"
+    _write_v1_config "${target_dir}" "${project_name}" "${language}" "${force_overwrite}"
+
+    # ── Step 3.6: Write .skeleton/layout.yaml ─────────────────────────────
+    log_step "Writing .skeleton/layout.yaml..."
+    local arch_source=""
+    for c in "docs/architecture.md" "architecture.md" "ARCHITECTURE.md"; do
+        [[ -f "${target_dir}/${c}" ]] && arch_source="${c}" && break
+    done
+    local role_root_rel="${init_root:-${init_role}}"
+    write_skeleton_layout \
+        "${target_dir}" \
+        "${init_role}" \
+        "${language}" \
+        "${role_root_rel}" \
+        "${init_mode}" \
+        "${arch_source}"
 
     # ── Step 4: Initialize git ────────────────────────────────────────────
     log_step "Initializing Git repository..."
@@ -435,6 +534,12 @@ cmd_init() {
             git init -q
             git add -A
             git commit -q -m "Initial commit: skeleton-parallel ${language} project (${project_name})"
+        elif [[ "${init_mode}" == "create" ]]; then
+            git add -A 2>/dev/null && \
+            git diff --cached --quiet || \
+            git commit -q -m "chore: skeleton init ${language} (${project_name})" 2>/dev/null || true
+        else
+            log_info "Git repo exists — skipping auto-commit (run: git add -A && git commit)"
         fi
     )
 
@@ -450,12 +555,18 @@ cmd_init() {
 
     echo ""
     log_ok "Project ${BOLD}${project_name}${NC} initialized successfully!"
+    [[ -n "${init_role}" ]] && \
+        log_ok "Role ${BOLD}${init_role}${NC} configured at ${BOLD}${effective_root}${NC}"
     echo ""
     echo -e "  ${CYAN}Next steps:${NC}"
     echo -e "    cd ${target_dir}"
+    if [[ -n "${init_role}" ]]; then
+        echo -e "    # Add more roles:  skeleton init typescript --role=frontend --root=frontend/"
+        echo -e "    skeleton doctor          # Validate merged layout"
+    fi
     echo -e "    skeleton run --dry-run   # Preview execution plan"
     echo -e "    skeleton run             # Execute all pending tasks"
-    echo -e "    skeleton doctor          # Run health check"
+    [[ -z "${init_role}" ]] && echo -e "    skeleton doctor          # Run health check"
     echo -e "    # Legacy: ./scripts/run_parallel.sh start --mode=3 1 2 3"
     echo ""
 }
@@ -468,19 +579,24 @@ _write_v1_config() {
     local target_dir="$1"
     local project_name="$2"
     local language="$3"
+    local force="${4:-false}"
 
-    # Write .ai/manifest.yaml from template
+    # Write .ai/manifest.yaml from template (idempotent — never overwrite unless force)
     local ai_dir="${target_dir}/.ai"
     mkdir -p "${ai_dir}"
     local manifest_tpl="${SKELETON_ROOT}/templates/ai/manifest.yaml.template"
     if [[ -f "${manifest_tpl}" ]]; then
-        local esc_name; esc_name="$(_sed_escape "${project_name}")"
-        sed \
-            -e "s/<project-name>/${esc_name}/g" \
-            -e "s/<domain>/${language}/g" \
-            -e "s/<one-line description>/A ${language} project built with skeleton-parallel/g" \
-            "${manifest_tpl}" > "${ai_dir}/manifest.yaml"
-        log_ok ".ai/manifest.yaml created"
+        if [[ ! -f "${ai_dir}/manifest.yaml" ]] || [[ "${force}" == "true" ]]; then
+            local esc_name; esc_name="$(_sed_escape "${project_name}")"
+            sed \
+                -e "s/<project-name>/${esc_name}/g" \
+                -e "s/<domain>/${language}/g" \
+                -e "s/<one-line description>/A ${language} project built with skeleton-parallel/g" \
+                "${manifest_tpl}" > "${ai_dir}/manifest.yaml"
+            log_ok ".ai/manifest.yaml created"
+        else
+            log_info ".ai/manifest.yaml already exists — preserved"
+        fi
     else
         log_warn ".ai/manifest.yaml template not found — skipping"
     fi
@@ -511,15 +627,19 @@ _write_v1_config() {
     local target_hooks="${target_dir}/scripts/hooks"
     mkdir -p "${target_hooks}"
     if [[ -d "${hooks_tpl}" ]]; then
-        cp -R "${hooks_tpl}/." "${target_hooks}/"
-        find "${target_hooks}" -name '*.sh' -exec chmod +x {} \;
-        log_ok "scripts/hooks/ created from ${language} template"
+        if [[ ! -f "${target_hooks}/quality-gates.sh" ]] || [[ "${force}" == "true" ]]; then
+            cp -R "${hooks_tpl}/." "${target_hooks}/"
+            find "${target_hooks}" -name '*.sh' -exec chmod +x {} \;
+            log_ok "scripts/hooks/ created from ${language} template"
+        else
+            log_info "scripts/hooks/ already exists — preserved"
+        fi
     else
         # Create minimal stub hooks if no template exists
         for hook in quality-gates acceptance-gates; do
             if [[ ! -f "${target_hooks}/${hook}.sh" ]]; then
-                printf '#!/usr/bin/env bash\n# %s.sh — %s\n# TODO: add project-specific gates\nexit 0\n' \
-                    "${hook}" "${project_name}" > "${target_hooks}/${hook}.sh"
+                printf '#!/usr/bin/env bash\n# %s.sh\n# TODO: add project-specific gates\nexit 0\n' \
+                    "${hook}" > "${target_hooks}/${hook}.sh"
                 chmod +x "${target_hooks}/${hook}.sh"
             fi
         done
@@ -802,6 +922,346 @@ cmd_integrate() {
     echo -e "    skeleton run --dry-run   # Preview execution plan"
     echo -e "    skeleton run             # Execute all pending tasks"
     echo ""
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# INIT HELPERS: Architecture-aware additive scaffolding
+# ═════════════════════════════════════════════════════════════════════════════
+
+# read_architecture_paths <project_root>
+# Parses tree-diagram lines from architecture.md. Returns declared dirs at
+# depth 1-2, one per line. Safe to call when no architecture file exists.
+read_architecture_paths() {
+    local project_root="$1"
+    local arch_file=""
+    for candidate in "${project_root}/docs/architecture.md" \
+                     "${project_root}/architecture.md" \
+                     "${project_root}/ARCHITECTURE.md"; do
+        [[ -f "${candidate}" ]] && arch_file="${candidate}" && break
+    done
+    [[ -z "${arch_file}" ]] && return 0
+
+    if command -v python3 &>/dev/null; then
+        python3 - "${arch_file}" << '__ARCHPY__'
+import sys, re
+arch_file = sys.argv[1]
+try:
+    with open(arch_file, encoding="utf-8", errors="replace") as f:
+        content = f.read()
+except Exception:
+    sys.exit(0)
+# Box-drawing chars: ├─ └─ │ and ASCII equivalents
+tree_re = re.compile(r"[├└│─|+]")
+dirs = set()
+for line in content.splitlines():
+    if not tree_re.search(line):
+        continue
+    cleaned = tree_re.sub(" ", line).strip()
+    token = cleaned.split()[0] if cleaned.split() else ""
+    if not token.endswith("/"):
+        continue
+    name = token.rstrip("/")
+    parts = [p for p in name.split("/") if p]
+    if 1 <= len(parts) <= 2:
+        dirs.add("/".join(parts))
+for d in sorted(dirs):
+    print(d)
+__ARCHPY__
+    else
+        # Fallback: grab tokens ending in / from the file
+        LC_ALL=C grep -oE '[a-zA-Z][a-zA-Z0-9._-]*/' "${arch_file}" \
+            | sed 's|/$||' | sort -u || true
+    fi
+}
+
+# resolve_init_root <target_dir> <init_role> <init_root_flag>
+# Returns the absolute path where template files should land.
+resolve_init_root() {
+    local target_dir="$1"
+    local init_role="$2"
+    local init_root_flag="$3"
+    if [[ -n "${init_root_flag}" ]]; then
+        echo "${target_dir}/${init_root_flag%/}"
+    elif [[ -n "${init_role}" ]]; then
+        echo "${target_dir}/${init_role}"
+    else
+        echo "${target_dir}"
+    fi
+}
+
+# detect_init_mode <target_dir> <effective_root> <init_role>
+# Auto-detects the merge mode. Prints: create | overlay | respect-existing
+detect_init_mode() {
+    local target_dir="$1"
+    local effective_root="$2"
+    local init_role="$3"
+
+    [[ -f "${target_dir}/.skeleton/layout.yaml" ]] && echo "respect-existing" && return
+
+    local arch_found=false
+    for candidate in "${target_dir}/docs/architecture.md" \
+                     "${target_dir}/architecture.md" \
+                     "${target_dir}/ARCHITECTURE.md"; do
+        [[ -f "${candidate}" ]] && arch_found=true && break
+    done
+
+    # Architecture exists + role specified → always respect-existing.
+    # The architecture is the source of truth for the internal layout;
+    # don't impose the template's structure even into a brand-new role dir.
+    if [[ "${arch_found}" == "true" ]] && [[ -n "${init_role}" ]]; then
+        echo "respect-existing"; return
+    fi
+
+    if [[ -n "${init_role}" ]] && [[ -d "${effective_root}" ]]; then
+        local existing_count
+        existing_count="$(find "${effective_root}" -maxdepth 1 -not -name '.' \
+            2>/dev/null | wc -l | tr -d ' ')"
+        if [[ "${existing_count}" -gt 0 ]]; then
+            echo "overlay"; return
+        fi
+    fi
+
+    if [[ "${effective_root}" == "${target_dir}" ]]; then
+        local root_count
+        root_count="$(find "${target_dir}" -maxdepth 1 -not -name '.' \
+            -not -name '.git' -not -name '.skeleton' 2>/dev/null | wc -l | tr -d ' ')"
+        if [[ "${root_count}" -gt 0 ]]; then
+            ${arch_found} && echo "respect-existing" || echo "overlay"; return
+        fi
+    fi
+
+    echo "create"
+}
+
+# _is_structure_file <relative_path>
+# Returns 0 (structure = skip in respect-existing) for source directories.
+# Returns 1 (tooling = safe to place) for build configs, etc.
+_is_structure_file() {
+    local rel_path="$1"
+    local top_dir; top_dir="$(echo "${rel_path}" | cut -d'/' -f1)"
+    local depth; depth=$(echo "${rel_path}" | tr -cd '/' | wc -c | tr -d ' ')
+
+    [[ "${depth}" -eq 0 ]] && return 1
+
+    if [[ "${depth}" -eq 1 ]]; then
+        local filename; filename="$(basename "${rel_path}")"
+        local tooling_files=(
+            "pyproject.toml" "requirements.txt" "requirements-dev.txt"
+            "go.mod" "go.sum" "package.json" "package-lock.json"
+            "yarn.lock" "pnpm-lock.yaml" "Cargo.toml" "Cargo.lock"
+            "pom.xml" "build.gradle" "settings.gradle"
+            "Makefile" "GNUmakefile" ".gitignore" ".gitattributes"
+            ".env.example" "tsconfig.json" "tsconfig.base.json"
+            ".eslintrc.js" ".eslintrc.json" ".eslintrc.yaml"
+            "config.yaml" "config.yml"
+        )
+        for tfile in "${tooling_files[@]}"; do
+            [[ "${filename}" == "${tfile}" ]] && return 1
+        done
+    fi
+
+    local structure_tops=(
+        "app" "src" "internal" "cmd" "lib"
+        "contracts" "database" "modules" "tests" "test" "orchestrator"
+    )
+    for sdir in "${structure_tops[@]}"; do
+        [[ "${top_dir}" == "${sdir}" ]] && return 0
+    done
+    return 1
+}
+
+# safe_copy_file <src> <dest> <mode> <force> <arch_paths_file> <rel_path> [role_arch_owned]
+# Core file placement primitive. Returns 0 on copy, 1 on skip.
+safe_copy_file() {
+    local src="$1" dest="$2" mode="$3"
+    local force="${4:-false}"
+    local arch_paths_file="${5:-/dev/null}"
+    local rel_path="${6:-}"
+    local role_arch_owned="${7:-false}"
+
+    case "${mode}" in
+        create)
+            if [[ -f "${dest}" ]] && [[ "${force}" != "true" ]]; then return 1; fi
+            mkdir -p "$(dirname "${dest}")" && cp "${src}" "${dest}"
+            return 0
+            ;;
+        overlay)
+            if [[ -f "${dest}" ]] && [[ "${force}" != "true" ]]; then return 1; fi
+            mkdir -p "$(dirname "${dest}")" && cp "${src}" "${dest}"
+            return 0
+            ;;
+        respect-existing)
+            [[ -f "${dest}" ]] && return 1
+            if [[ -n "${rel_path}" ]] && _is_structure_file "${rel_path}"; then
+                # If role root is arch-declared, ALL structure files are off-limits —
+                # the architecture defines the internal layout, not the template.
+                [[ "${role_arch_owned}" == "true" ]] && return 1
+                # Otherwise check if this file's top-level dir is arch-declared.
+                local top_dir; top_dir="$(echo "${rel_path}" | cut -d'/' -f1)"
+                if grep -qFx "${top_dir}" "${arch_paths_file}" 2>/dev/null; then return 1; fi
+            fi
+            mkdir -p "$(dirname "${dest}")" && cp "${src}" "${dest}"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# write_skeleton_layout <project_root> <role> <language> <role_root> <mode> <arch_source>
+# Creates or idempotently updates .skeleton/layout.yaml at the project root.
+write_skeleton_layout() {
+    local project_root="$1" role_name="${2:-}" language="$3"
+    local role_root="${4:-}" merge_mode="${5:-create}" arch_source="${6:-}"
+    local layout_dir="${project_root}/.skeleton"
+    local layout_file="${layout_dir}/layout.yaml"
+    mkdir -p "${layout_dir}"
+
+    if [[ ! -f "${layout_file}" ]]; then
+        {
+            echo "version: \"1.0\""
+            echo "merge_policy: ${merge_mode}"
+            [[ -n "${arch_source}" ]] && echo "architecture_source: ${arch_source}"
+            echo "roles:"
+            if [[ -n "${role_name}" ]] && [[ -n "${role_root}" ]]; then
+                echo "  ${role_name}:"
+                echo "    language: ${language}"
+                echo "    root: ${role_root}/"
+                echo "    status: active"
+            fi
+        } > "${layout_file}"
+        log_ok ".skeleton/layout.yaml created"
+        return
+    fi
+
+    # File exists — update using Python for reliable YAML merging
+    if command -v python3 &>/dev/null; then
+        local py_script="${TMPDIR:-/tmp}/sk_layout_update_$$.py"
+        cat > "${py_script}" << 'SKPY'
+import sys
+layout_file, role_name, language, role_root, merge_mode, arch_source = sys.argv[1:]
+with open(layout_file) as f:
+    lines = f.readlines()
+data_lines, roles_block, in_roles = [], [], False
+for line in lines:
+    s = line.rstrip()
+    if s.startswith("merge_policy:"):
+        data_lines.append(f"merge_policy: {merge_mode}\n"); continue
+    if s.startswith("roles:"):
+        in_roles = True; data_lines.append(line); continue
+    if in_roles:
+        if s and not s.startswith(" ") and not s.startswith("\t"):
+            in_roles = False
+        else:
+            roles_block.append(line); continue
+    if not in_roles:
+        data_lines.append(line)
+if role_name:
+    if any(f"  {role_name}:" in l for l in roles_block):
+        nr, in_t = [], False
+        for line in roles_block:
+            s = line.rstrip()
+            if s == f"  {role_name}:":
+                in_t = True; nr.append(line)
+                nr += [f"    language: {language}\n",
+                       f"    root: {role_root}/\n",
+                       f"    status: active\n"]
+            elif in_t and s.startswith("    "):
+                continue
+            else:
+                in_t = False; nr.append(line)
+        roles_block = nr
+    else:
+        roles_block += [f"  {role_name}:\n",
+                        f"    language: {language}\n",
+                        f"    root: {role_root}/\n",
+                        f"    status: active\n"]
+if arch_source and not any("architecture_source:" in l for l in data_lines):
+    nd = []
+    for line in data_lines:
+        nd.append(line)
+        if line.startswith("merge_policy:"):
+            nd.append(f"architecture_source: {arch_source}\n")
+    data_lines = nd
+with open(layout_file, "w") as f:
+    f.writelines(data_lines); f.writelines(roles_block)
+SKPY
+        python3 "${py_script}" "${layout_file}" "${role_name}" "${language}" \
+                "${role_root}" "${merge_mode}" "${arch_source}"
+        rm -f "${py_script}"
+        log_ok ".skeleton/layout.yaml updated (role: ${role_name:-none})"
+    else
+        [[ -n "${role_name}" ]] && [[ -n "${role_root}" ]] && \
+            printf '  %s:\n    language: %s\n    root: %s/\n    status: active\n' \
+                "${role_name}" "${language}" "${role_root}" >> "${layout_file}"
+        log_ok ".skeleton/layout.yaml updated"
+    fi
+}
+
+# _copy_common_overlay <dest> <force>
+# Idempotent version of _copy_common — never overwrites unless force=true.
+_copy_common_overlay() {
+    local dest="$1" force="${2:-false}"
+
+    mkdir -p "${dest}/.github"
+    for src_dir in skills agents prompts; do
+        local src="${SKELETON_ROOT}/.github/${src_dir}"
+        local dst="${dest}/.github/${src_dir}"
+        [[ ! -d "${src}" ]] && continue
+        if [[ ! -d "${dst}" ]] || [[ "${force}" == "true" ]]; then
+            cp -R "${src}" "${dest}/.github/"; log_ok "  .github/${src_dir}/ installed"
+        else
+            log_info "  .github/${src_dir}/ already exists — preserved"
+        fi
+    done
+    local instr_src="${SKELETON_ROOT}/.github/copilot-instructions.md"
+    local instr_dst="${dest}/.github/copilot-instructions.md"
+    if [[ -f "${instr_src}" ]]; then
+        if [[ ! -f "${instr_dst}" ]] || [[ "${force}" == "true" ]]; then
+            cp "${instr_src}" "${instr_dst}"; log_ok "  .github/copilot-instructions.md installed"
+        else
+            log_info "  .github/copilot-instructions.md already exists — preserved"
+        fi
+    fi
+
+    mkdir -p "${dest}/scripts"
+    local rp_src="${SKELETON_ROOT}/scripts/run_parallel.sh"
+    local rp_dst="${dest}/scripts/run_parallel.sh"
+    if [[ -f "${rp_src}" ]]; then
+        if [[ ! -f "${rp_dst}" ]] || [[ "${force}" == "true" ]]; then
+            cp "${rp_src}" "${rp_dst}"; chmod +x "${rp_dst}"; log_ok "  scripts/run_parallel.sh installed"
+        else
+            log_info "  scripts/run_parallel.sh already exists — preserved"
+        fi
+    fi
+
+    mkdir -p "${dest}/config"
+    local phases_src="${SKELETON_ROOT}/config/phases.yaml"
+    local phases_dst="${dest}/config/phases.yaml"
+    if [[ -f "${phases_src}" ]]; then
+        if [[ ! -f "${phases_dst}" ]] || [[ "${force}" == "true" ]]; then
+            cp "${phases_src}" "${phases_dst}"; log_ok "  config/phases.yaml installed"
+        else
+            log_info "  config/phases.yaml already exists — preserved"
+        fi
+    fi
+
+    mkdir -p "${dest}/docs"
+    for doc in architecture.md implementation_roadmap.md orchestrator_spec.md \
+               dto_contracts.md db_adapter_spec.md PARALLEL_DEV.md \
+               AGENTS_AND_SKILLS.md STARTER_GUIDE.md PROGRESS_REPORT.md; do
+        local dsrc="${SKELETON_ROOT}/docs/${doc}"
+        local ddst="${dest}/docs/${doc}"
+        if [[ -f "${dsrc}" ]]; then
+            if [[ ! -f "${ddst}" ]] || [[ "${force}" == "true" ]]; then
+                cp "${dsrc}" "${ddst}"; log_ok "  docs/${doc} installed"
+            else
+                log_info "  docs/${doc} already exists — preserved"
+            fi
+        fi
+    done
+
+    mkdir -p "${dest}/output"
+    [[ ! -f "${dest}/output/.gitignore" ]] && echo '*' > "${dest}/output/.gitignore"
 }
 
 _copy_common() {
@@ -1458,32 +1918,207 @@ cmd_doctor() {
     local issues=0
     local warnings=0
 
-    # ── Framework files ───────────────────────────────────────────────────
-    log_step "Checking framework files..."
-
     _check_exists() {
         local path="$1" label="$2" severity="${3:-error}"
         if [[ -e "${target_dir}/${path}" ]]; then
             log_ok "${label}"
         elif [[ "${severity}" == "warn" ]]; then
             log_warn "${label} — MISSING (optional)"
-            ((warnings++))
+            (( ++warnings ))
+        elif [[ "${severity}" == "info" ]]; then
+            log_info "${label} — not present"
         else
             log_error "${label} — MISSING"
-            ((issues++))
+            (( ++issues ))
         fi
+        return 0
     }
 
-    _check_exists ".github/copilot-instructions.md" "copilot-instructions.md"
-    _check_exists "scripts/run_parallel.sh" "run_parallel.sh"
-    _check_exists "config/phases.yaml" "phases.yaml"
-    _check_exists ".github/skills" "Skills directory"
-    _check_exists ".github/agents" "Agents directory"
-    _check_exists ".github/prompts" "Prompts directory" "warn"
+    # ── Section 1: Identity & Runtime Config ──────────────────────────────
+    log_step "Checking identity & runtime config..."
 
-    # ── Skills inventory ──────────────────────────────────────────────────
+    if [[ -f "${target_dir}/.ai/manifest.yaml" ]]; then
+        log_ok ".ai/manifest.yaml"
+    else
+        log_error ".ai/manifest.yaml — MISSING (run: ars init  or  skeleton integrate)"
+        (( ++issues ))
+    fi
+
+    if [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
+        if bash -c "
+            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
+            SKELETON_DRIVER='' load_config '${target_dir}' 2>/dev/null" 2>/dev/null; then
+            log_ok "config/skeleton.yaml"
+        else
+            log_error "config/skeleton.yaml — present but not loadable (run: skeleton integrate)"
+            (( ++issues ))
+        fi
+    else
+        log_error "config/skeleton.yaml — MISSING (run: skeleton integrate)"
+        (( ++issues ))
+    fi
+
+    if [[ -f "${target_dir}/docs/PLAN.md" ]]; then
+        log_ok "docs/PLAN.md"
+    else
+        log_error "docs/PLAN.md — MISSING (canonical work source)"
+        (( ++issues ))
+    fi
+
+    # ── Section 2: Agentic Knowledge Plane ────────────────────────────────
     echo ""
-    log_step "Checking skills..."
+    log_step "Checking agentic knowledge plane..."
+
+    local agents_dir="" skills_dir="" knowledge_source=""
+    if [[ -d "${target_dir}/.ai/agents" ]]; then
+        agents_dir="${target_dir}/.ai/agents"
+        knowledge_source=".ai"
+    elif [[ -d "${target_dir}/.github/agents" ]]; then
+        agents_dir="${target_dir}/.github/agents"
+        knowledge_source=".github"
+    fi
+    if [[ -d "${target_dir}/.ai/skills" ]]; then
+        skills_dir="${target_dir}/.ai/skills"
+    elif [[ -d "${target_dir}/.github/skills" ]]; then
+        skills_dir="${target_dir}/.github/skills"
+    fi
+
+    if [[ -n "${agents_dir}" ]]; then
+        log_ok "Agents directory: ${agents_dir#${target_dir}/}"
+    else
+        log_error "No agents directory found (expected .ai/agents/ or .github/agents/)"
+        (( ++issues ))
+    fi
+    if [[ -n "${skills_dir}" ]]; then
+        log_ok "Skills directory: ${skills_dir#${target_dir}/}"
+    else
+        log_error "No skills directory found (expected .ai/skills/ or .github/skills/)"
+        (( ++issues ))
+    fi
+    if [[ "${knowledge_source}" == ".github" ]]; then
+        log_warn "Skills/agents live in .github/ (legacy) — run: ars compose to migrate to .ai/"
+        (( ++warnings ))
+    fi
+    _check_exists ".github/prompts" ".github/prompts/ (prompts directory)" "warn"
+
+    # ── Section 3: Pipeline Infrastructure ────────────────────────────────
+    echo ""
+    log_step "Checking pipeline infrastructure..."
+    _check_exists "scripts/hooks/quality-gates.sh" "scripts/hooks/quality-gates.sh"
+    if [[ -f "${target_dir}/scripts/run_parallel.sh" ]]; then
+        log_info "scripts/run_parallel.sh present (deprecated shim — safe to keep)"
+    fi
+
+    # ── Section 4: Provider-Specific Harness ──────────────────────────────
+    echo ""
+    log_step "Checking provider harness..."
+
+    local _drv="" _provider=""
+    if [[ -f "${SKELETON_ROOT}/scripts/lib/config.sh" ]]; then
+        local _cfg_out
+        _cfg_out="$(bash -c "
+            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
+            load_config '${target_dir}' 2>/dev/null
+            echo \"driver=\${SKELETON_DRIVER:-cli_subscription}\"
+            echo \"provider=\${SKELETON_PROVIDER:-}\"" 2>/dev/null || true)"
+        _drv="$(echo "${_cfg_out}"      | grep '^driver='   | cut -d= -f2)"
+        _provider="$(echo "${_cfg_out}" | grep '^provider=' | cut -d= -f2)"
+    fi
+    _drv="${_drv:-cli_subscription}"
+    # Infer provider from config/skeleton.yaml if not set via SKELETON_PROVIDER
+    if [[ -z "${_provider}" ]] && [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
+        _provider="$(grep -E '^\s*provider\s*:' "${target_dir}/config/skeleton.yaml" \
+            2>/dev/null | head -1 | sed 's/.*://;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
+    fi
+    _provider="${_provider:-copilot}"
+
+    log_info "driver=${_drv}  provider=${_provider}"
+
+    case "${_provider}" in
+        copilot)
+            _check_exists ".github/copilot-instructions.md" \
+                ".github/copilot-instructions.md (Copilot harness)" "warn"
+            if command -v copilot &>/dev/null; then
+                log_ok "copilot CLI found: $(command -v copilot)"
+            else
+                log_warn "copilot CLI — not found (optional; needed for driver=cli_subscription)"
+                (( ++warnings ))
+            fi
+            ;;
+        claude)
+            _check_exists "CLAUDE.md" "CLAUDE.md (Claude Code harness)" "warn"
+            if command -v claude &>/dev/null; then
+                log_ok "claude CLI found: $(command -v claude)"
+            else
+                log_warn "claude CLI — not found"
+                (( ++warnings ))
+            fi
+            ;;
+        codex)
+            _check_exists "AGENTS.md" "AGENTS.md (Codex harness)" "warn"
+            if command -v codex &>/dev/null; then
+                log_ok "codex CLI found: $(command -v codex)"
+            else
+                log_warn "codex CLI — not found"
+                (( ++warnings ))
+            fi
+            ;;
+        cursor)
+            _check_exists ".cursor/rules" ".cursor/rules/ (Cursor harness)" "warn"
+            ;;
+        antigravity)
+            _check_exists ".antigravity" ".antigravity/ (Antigravity harness)" "warn"
+            ;;
+        *)
+            log_info "Provider '${_provider}' — no harness check defined"
+            ;;
+    esac
+
+    case "${_drv}" in
+        router_http)
+            if command -v node &>/dev/null; then
+                log_ok "Node.js $(node --version 2>/dev/null) (required for router_http / 9router)"
+            else
+                log_warn "Node.js — not found (needed for driver=router_http)"
+                (( ++warnings ))
+            fi
+            ;;
+        sdk_cursor)
+            if command -v node &>/dev/null; then
+                local _nv; _nv="$(node --version 2>/dev/null | sed 's/v//')"
+                local _nmaj; _nmaj="$(echo "${_nv}" | cut -d. -f1)"
+                if [[ "${_nmaj:-0}" -ge 22 ]]; then
+                    log_ok "Node.js v${_nv} (≥22.13 satisfied for sdk_cursor)"
+                else
+                    log_error "Node.js v${_nv} — need ≥22.13 for driver=sdk_cursor"
+                    (( ++issues ))
+                fi
+            else
+                log_error "Node.js — NOT FOUND (required for driver=sdk_cursor)"
+                (( ++issues ))
+            fi
+            if [[ -z "${CURSOR_API_KEY:-}" ]]; then
+                log_error "CURSOR_API_KEY — not set (required for driver=sdk_cursor)"
+                (( ++issues ))
+            else
+                log_ok "CURSOR_API_KEY set"
+            fi
+            ;;
+    esac
+
+    # ── Section 5: ARES Tooling ────────────────────────────────────────────
+    echo ""
+    log_step "Checking ARES tooling..."
+    if command -v ars &>/dev/null; then
+        log_ok "ars CLI found: $(command -v ars)"
+    else
+        log_warn "ars CLI — not found (install: https://github.com/okfriansyah-moh/ares)"
+        (( ++warnings ))
+    fi
+
+    # ── Section 6: Skills & Agents Inventory ──────────────────────────────
+    echo ""
+    log_step "Checking skills inventory..."
     local core_skills=("dto" "pipeline" "modularity" "determinism" "idempotency"
                        "failure" "config-validation" "code-quality" "coding-standards"
                        "database-portability" "docs-sync" "conflict-resolution"
@@ -1496,7 +2131,14 @@ cmd_doctor() {
     local skill_count=0
     local missing_skills=()
     for skill in "${core_skills[@]}"; do
-        if [[ -f "${target_dir}/.github/skills/${skill}/SKILL.md" ]]; then
+        local _skill_found=false
+        if [[ -n "${skills_dir}" ]]; then
+            if [[ -f "${skills_dir}/${skill}/SKILL.md" ]] || \
+               [[ -f "${skills_dir}/${skill}.md" ]]; then
+                _skill_found=true
+            fi
+        fi
+        if [[ "${_skill_found}" == "true" ]]; then
             skill_count=$(( skill_count + 1 ))
         else
             missing_skills+=("${skill}")
@@ -1505,12 +2147,11 @@ cmd_doctor() {
     log_ok "Skills present: ${skill_count}/${#core_skills[@]}"
     if [[ ${#missing_skills[@]} -gt 0 ]]; then
         log_warn "Missing skills: ${missing_skills[*]}"
-        ((warnings++))
+        (( ++warnings ))
     fi
 
-    # ── Agents inventory ──────────────────────────────────────────────────
     echo ""
-    log_step "Checking agents..."
+    log_step "Checking agents inventory..."
     local core_agents=("phase-builder" "dto-guardian" "integration" "refactor"
                        "orchestrator" "module-builder" "conflict-resolver"
                        "merge-reviewer" "task-sync" "scaffold" "security-auditor"
@@ -1518,7 +2159,15 @@ cmd_doctor() {
     local agent_count=0
     local missing_agents=()
     for agent in "${core_agents[@]}"; do
-        if [[ -f "${target_dir}/.github/agents/${agent}.agent.md" ]]; then
+        local _agent_found=false
+        if [[ -n "${agents_dir}" ]]; then
+            if [[ -f "${agents_dir}/${agent}.agent.md" ]] || \
+               [[ -f "${agents_dir}/${agent}.md" ]] || \
+               [[ -d "${agents_dir}/${agent}" ]]; then
+                _agent_found=true
+            fi
+        fi
+        if [[ "${_agent_found}" == "true" ]]; then
             agent_count=$(( agent_count + 1 ))
         else
             missing_agents+=("${agent}")
@@ -1527,10 +2176,10 @@ cmd_doctor() {
     log_ok "Agents present: ${agent_count}/${#core_agents[@]}"
     if [[ ${#missing_agents[@]} -gt 0 ]]; then
         log_warn "Missing agents: ${missing_agents[*]}"
-        ((warnings++))
+        (( ++warnings ))
     fi
 
-    # ── Project structure ─────────────────────────────────────────────────
+    # ── Section 7: Project Structure ──────────────────────────────────────
     echo ""
     log_step "Checking project structure..."
     local detected_lang
@@ -1540,10 +2189,10 @@ cmd_doctor() {
         _check_lang_structure "${detected_lang}" "${target_dir}"
     else
         log_warn "Could not detect project language"
-        ((warnings++))
+        (( ++warnings ))
     fi
 
-    # ── Doc templates ─────────────────────────────────────────────────────
+    # ── Section 8: Doc Templates ───────────────────────────────────────────
     echo ""
     log_step "Checking documentation..."
     local doc_files=("architecture.md" "implementation_roadmap.md" "orchestrator_spec.md"
@@ -1552,77 +2201,14 @@ cmd_doctor() {
         _check_exists "docs/${doc}" "docs/${doc}" "warn"
     done
 
-    # ── Git health ────────────────────────────────────────────────────────
+    # ── Section 9: Git Health ──────────────────────────────────────────────
     echo ""
     log_step "Checking Git setup..."
     if [[ -d "${target_dir}/.git" ]]; then
         log_ok "Git repository initialized"
     else
         log_warn "Not a Git repository"
-        ((warnings++))
-    fi
-
-    # ── v1.0 checks (new in v1.0) ─────────────────────────────────────────
-    echo ""
-    log_step "Checking v1.0 components..."
-
-    # PLAN.md presence
-    _check_exists "docs/PLAN.md" "docs/PLAN.md (task plan)" "warn"
-
-    # .ai/manifest.yaml
-    if [[ -f "${target_dir}/.ai/manifest.yaml" ]]; then
-        log_ok ".ai/manifest.yaml present"
-    else
-        log_warn ".ai/manifest.yaml — MISSING (run: skeleton integrate)"
-        (( warnings++ ))
-    fi
-
-    # config/skeleton.yaml
-    if [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
-        if bash -c "
-            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
-            SKELETON_DRIVER='' load_config '${target_dir}' 2>/dev/null" 2>/dev/null; then
-            log_ok "config/skeleton.yaml present and loadable"
-        else
-            log_warn "config/skeleton.yaml — could not load (run: skeleton integrate)"
-            (( warnings++ ))
-        fi
-    else
-        log_warn "config/skeleton.yaml — MISSING (run: skeleton integrate)"
-        (( warnings++ ))
-    fi
-
-    # ars CLI
-    if command -v ars &>/dev/null; then
-        log_ok "ars CLI found: $(command -v ars)"
-    else
-        log_warn "ars CLI — NOT FOUND (optional; install: https://github.com/okfriansyah-moh/ares)"
-        (( warnings++ ))
-    fi
-
-    # Node.js version check (required only for sdk_cursor driver)
-    if [[ -f "${SKELETON_ROOT}/scripts/lib/config.sh" ]]; then
-        local _drv
-        _drv="$(bash -c "
-            source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
-            load_config '${target_dir}' 2>/dev/null
-            echo \"\${SKELETON_DRIVER:-cli_subscription}\"" 2>/dev/null || echo "cli_subscription")"
-        if [[ "${_drv}" == "sdk_cursor" ]]; then
-            if command -v node &>/dev/null; then
-                log_ok "Node.js $(node --version 2>/dev/null) (required for sdk_cursor)"
-            else
-                log_error "Node.js — NOT FOUND (required for driver=sdk_cursor)"
-                (( issues++ ))
-            fi
-        fi
-    fi
-
-    # Driver binary (advisory)
-    if command -v copilot &>/dev/null; then
-        log_ok "Copilot CLI found (cli_subscription/copilot driver)"
-    else
-        log_warn "Copilot CLI — not found (optional; needed for driver=cli_subscription/copilot)"
-        (( warnings++ ))
+        (( ++warnings ))
     fi
 
     # ── Summary ───────────────────────────────────────────────────────────
@@ -1637,17 +2223,18 @@ cmd_doctor() {
     fi
     echo ""
 
-    # ── Deep agent health check ───────────────────────────────────────────
-    if [[ ${issues} -gt 0 ]] || [[ ${warnings} -gt 0 ]]; then
-        log_step "Spawning Copilot agent for deep health check and auto-fix..."
-        _spawn_copilot_agent "${target_dir}" "doctor" \
-            "Run a deep health check on this project. Found ${issues} issues and ${warnings} warnings. Validate and fix: 1) All module boundaries (no cross-module imports). 2) DTO contracts are immutable and properly defined in contracts/. 3) Database adapter is the sole DB access point (no raw SQL in modules). 4) All config is YAML-driven (no hardcoded values in code). 5) Tests are deterministic and network-free. 6) All missing skills, agents, or prompts should be installed. 7) Missing docs templates should be created from skeleton-parallel defaults. Fix all issues found. After fixing, commit with message 'chore: doctor auto-fix'." \
-            "doctor-deep-check"
-    else
-        # Background validation even when checks pass
-        _spawn_copilot_agent_bg "${target_dir}" "doctor" \
-            "All basic checks passed. Run a deep validation: 1) Verify module boundaries. 2) Check DTO immutability. 3) Validate database adapter isolation. 4) Check for hardcoded config values. 5) Ensure parallel dev readiness (phases.yaml + run_parallel.sh). Report findings in .parallel-dev/agent-logs/." \
-            "doctor-bg-validation"
+    # ── Deep agent health check (Copilot only) ────────────────────────────
+    if [[ "${_provider}" == "copilot" ]]; then
+        if [[ ${issues} -gt 0 ]] || [[ ${warnings} -gt 0 ]]; then
+            log_step "Spawning Copilot agent for deep health check and auto-fix..."
+            _spawn_copilot_agent "${target_dir}" "doctor" \
+                "Run a deep health check on this project. Found ${issues} issues and ${warnings} warnings. Validate and fix: 1) All module boundaries (no cross-module imports). 2) DTO contracts are immutable and properly defined in contracts/. 3) Database adapter is the sole DB access point (no raw SQL in modules). 4) All config is YAML-driven (no hardcoded values in code). 5) Tests are deterministic and network-free. 6) All missing skills, agents, or prompts should be installed. 7) Missing docs templates should be created from skeleton-parallel defaults. Fix all issues found. After fixing, commit with message 'chore: doctor auto-fix'." \
+                "doctor-deep-check"
+        else
+            _spawn_copilot_agent_bg "${target_dir}" "doctor" \
+                "All basic checks passed. Run a deep validation: 1) Verify module boundaries. 2) Check DTO immutability. 3) Validate database adapter isolation. 4) Check for hardcoded config values. 5) Ensure parallel dev readiness. Report findings in .parallel-dev/agent-logs/." \
+                "doctor-bg-validation"
+        fi
     fi
 
     return ${issues}

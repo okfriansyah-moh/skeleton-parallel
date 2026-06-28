@@ -10,5 +10,11 @@
     "stage": "rollback",
     "status": "failed",
     "updated_at": "2026-06-27T06:05:00Z"
+  },
+  "task_1": {
+    "key": "task_1",
+    "stage": "rollback",
+    "status": "failed",
+    "updated_at": "2026-06-28T11:04:02Z"
   }
 }
