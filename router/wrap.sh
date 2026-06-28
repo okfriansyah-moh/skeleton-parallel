@@ -212,28 +212,41 @@ router_start() {
     return 0
 }
 
+# ── _find_router_pid_by_port ──────────────────────────────────────────────────
+# Fallback: find the PID of whatever process is listening on the router port.
+_find_router_pid_by_port() {
+    lsof -iTCP:"${_ROUTER_PORT}" -sTCP:LISTEN -nP 2>/dev/null \
+        | awk 'NR>1 {print $2}' | head -1
+}
+
 # ── router_stop ───────────────────────────────────────────────────────────────
-# Stop the 9router daemon using the PID from .skeleton-dev/router.pid.
+# Stop the 9router daemon. Tries PID file first; falls back to port lookup
+# so stale PID files never block a running daemon from being stopped.
 router_stop() {
     local pid_file
     pid_file="$(_router_pid_file)"
 
-    if [[ ! -f "${pid_file}" ]]; then
-        log_warn "[router] No PID file found — daemon may not be running"
-        return 0
+    local pid=""
+
+    # Try PID file first
+    if [[ -f "${pid_file}" ]]; then
+        pid="$(cat "${pid_file}" 2>/dev/null || true)"
+        if [[ -n "${pid}" ]] && ! kill -0 "${pid}" 2>/dev/null; then
+            log_warn "[router] PID file stale (${pid} not running) — checking port ${_ROUTER_PORT}..."
+            pid=""
+        fi
     fi
 
-    local pid
-    pid="$(cat "${pid_file}" 2>/dev/null || true)"
+    # Fallback: find by port
+    if [[ -z "${pid}" ]]; then
+        pid="$(_find_router_pid_by_port)"
+        if [[ -n "${pid}" ]]; then
+            log_info "[router] Found 9router via port ${_ROUTER_PORT} (PID: ${pid})"
+        fi
+    fi
 
     if [[ -z "${pid}" ]]; then
-        log_warn "[router] PID file is empty — removing"
-        rm -f "${pid_file}"
-        return 0
-    fi
-
-    if ! kill -0 "${pid}" 2>/dev/null; then
-        log_warn "[router] Process ${pid} is not running — cleaning up PID file"
+        log_warn "[router] 9router is not running on port ${_ROUTER_PORT}"
         rm -f "${pid_file}"
         return 0
     fi
