@@ -165,7 +165,7 @@ skeleton integrate --dir=./path/to/repo
 
 **6. Validate project health** · `skeleton doctor`
 
-Check that all required tools, config keys, hooks, and `.ai/` structure are wired correctly.
+Provider-agnostic health check. Validates `.ai/manifest.yaml` (ARES canonical source), `config/skeleton.yaml`, skills/agents from `.ai/` (`.github/` as legacy fallback), pipeline infra, and the harness file for your configured provider (Copilot → `.github/copilot-instructions.md`, Claude → `CLAUDE.md`, Codex → `AGENTS.md`, Cursor → `.cursor/rules/`).
 
 ```sh
 skeleton doctor              # checks current directory
@@ -185,7 +185,7 @@ skeleton upgrade --dir=../my-project --no-agent
 
 **8. Auto-detect stack and install matching skills** · `skeleton autoskills`
 
-Scans the project's language, frameworks, and tools, then installs the matching skill modules into `.github/skills/`.
+Scans the project's language, frameworks, and tools, then installs the matching skill modules into `.ai/skills/` (ARES canonical source).
 
 ```sh
 skeleton autoskills                     # current directory
@@ -196,12 +196,12 @@ skeleton autoskills -y                  # skip confirmation prompts
 
 **9. Add a skill or agent to a project** · `skeleton add`
 
-Install a single named skill or agent from the skeleton-parallel registry into the current project.
+Install a single named skill or agent from the skeleton-parallel registry into `.ai/skills/` or `.ai/agents/` (ARES canonical source). After adding, run `ars compose --target <provider>` to update your provider harness.
 
 ```sh
-skeleton add skill security-audit
+skeleton add skill security-audit    # installs to .ai/skills/security-audit/
 skeleton add skill test-generation
-skeleton add agent test-builder
+skeleton add agent test-builder      # installs to .ai/agents/
 skeleton add agent conflict-resolver
 ```
 
@@ -217,14 +217,33 @@ skeleton list templates
 
 **11. Sync skills and agents from upstream** · `skeleton sync`
 
-Force-sync all skills, agents, and scripts from the skeleton-parallel upstream into the current project.
+Sync all skills, agents, and prompts from the skeleton-parallel upstream into `.ai/` (ARES canonical source), then run `ars compose --target <provider>` to regenerate your provider harness. If `ars` is not installed, skeleton will offer to install it automatically.
 
 ```sh
-skeleton sync                     # current directory
+skeleton sync                     # sync to .ai/ + compose provider harness
 skeleton sync --dir=../my-project
 ```
 
-**12. Regenerate hook templates** · `skeleton hooks regenerate`
+**12. Compose provider harness from `.ai/` knowledge** · `ars compose`
+
+skeleton-parallel uses [ARES](https://github.com/okfriansyah-moh/ares) (AI Repository Standard) as the canonical knowledge layer. Skills, agents, instructions, and prompts live in `.ai/` and are compiled into provider-specific harness files by the `ars` CLI.
+
+```sh
+ars compose --target copilot    # → .github/copilot-instructions.md
+ars compose --target claude     # → CLAUDE.md
+ars compose --target codex      # → AGENTS.md
+ars compose --target cursor     # → .cursor/rules/*.mdc
+```
+
+Switch providers by changing `config/skeleton.yaml` and re-running `ars compose` — your `.ai/` source stays the same. To import existing provider files into `.ai/`:
+
+```sh
+ars import github   # import .github/copilot-instructions.md → .ai/
+ars import claude   # import CLAUDE.md → .ai/
+ars validate        # check .ai/ structure
+```
+
+**13. Regenerate hook templates** · `skeleton hooks regenerate`
 
 Copy the language-appropriate hook templates (`quality-gates.sh`, `acceptance-gates.sh`) into `scripts/hooks/`.
 
@@ -233,7 +252,7 @@ skeleton hooks regenerate
 skeleton hooks regenerate --dir=../my-project
 ```
 
-**13. Check pipeline state** · `skeleton status`
+**15. Check pipeline state** · `skeleton status`
 
 Print the current run state from `.skeleton-dev/run-status.json` — which stages passed, failed, or are in progress.
 
@@ -241,7 +260,7 @@ Print the current run state from `.skeleton-dev/run-status.json` — which stage
 skeleton status
 ```
 
-**14. Clean up worktrees and branches** · `skeleton cleanup`
+**16. Clean up worktrees and branches** · `skeleton cleanup`
 
 Remove all parallel worktrees, stale task branches, and reset `.skeleton-dev/` state after a run.
 
@@ -250,7 +269,7 @@ skeleton cleanup             # prompt before removing
 skeleton cleanup --force     # no prompts
 ```
 
-**15. CI with bounded retries and automatic rollback** · `skeleton run --full`
+**17. CI with bounded retries and automatic rollback** · `skeleton run --full`
 
 Each task gets a git checkpoint before execution. On retry exhaustion the branch rolls back automatically.
 
@@ -261,7 +280,7 @@ skeleton run --full
 # On acceptance fail:     feedback router re-routes to the correct fix path
 ```
 
-**16. Migrate from `run_parallel.sh` + `config/phases.yaml`** · `skeleton run`
+**18. Migrate from `run_parallel.sh` + `config/phases.yaml`** · `skeleton run`
 
 The old phase-based orchestrator still works via a compatibility shim. Migrate when ready.
 
@@ -273,7 +292,7 @@ The old phase-based orchestrator still works via a compatibility shim. Migrate w
 skeleton run 1 2 3
 ```
 
-**17. Check version or get help** · `skeleton version` · `skeleton help`
+**19. Check version or get help** · `skeleton version` · `skeleton help`
 
 ```sh
 skeleton version     # print installed version (derived from git tag)
@@ -469,7 +488,7 @@ scripts/hooks/
 | `bash 4+`                      | All shell scripts                | `brew install bash`                                    |
 | `git 2.5+`                     | Checkpoints, worktrees, PR       | `brew install git`                                     |
 | `python3 3.10+`                | plan_parser.py, detect_legacy.py | `brew install python`                                  |
-| `ars` (ARES CLI)               | Stage −1 knowledge sync          | [install ars](https://github.com/okfriansyah-moh/ares) |
+| `ars` (ARES CLI)               | Knowledge sync + harness compose (`ars compose`, `ars import`, `ars validate`) | [install ars](https://github.com/okfriansyah-moh/ares) |
 | `9router`                      | `driver: router_http`            | `npm install -g @9router/server`                       |
 | `copilot` / `claude` / `codex` | `driver: cli_subscription`       | vendor-specific                                        |
 | `node 22.13+`                  | `driver: sdk_cursor`             | `brew install node`                                    |
@@ -489,7 +508,7 @@ scripts/hooks/
 | `run_parallel.sh cleanup`                 | `skeleton cleanup`                                        |
 | `config/phases.yaml`                      | `docs/PLAN.md` (tasks + dep graph)                        |
 | `MODEL_HEAVY` env                         | `router.combos.heavy` in `config/skeleton.yaml`           |
-| `COPILOT_MODEL` env                       | `execution.cli.model` in `config/skeleton.yaml`           |
+| `COPILOT_MODEL` env                       | `AGENT_MODEL` env (or `execution.cli.model` in `config/skeleton.yaml`) |
 | `MAX_PARALLEL_AGENTS` env                 | `execution.max_parallel_agents` in `config/skeleton.yaml` |
 
 See [docs/PARALLEL_DEV.md §11](docs/PARALLEL_DEV.md) for the full migration guide.
@@ -531,7 +550,7 @@ See [docs/PARALLEL_DEV.md §11](docs/PARALLEL_DEV.md) for the full migration gui
 
 ### Skills (28)
 
-`.github/skills/<name>/SKILL.md` — loaded on-demand to minimize token usage.
+`.ai/skills/<name>/SKILL.md` — canonical source (ARES). Use `ars compose --target <provider>` to compile into your provider's harness. Loaded on-demand to minimize token usage.
 
 **Always-active:**
 
