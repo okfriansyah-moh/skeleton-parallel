@@ -34,8 +34,9 @@ VERSION="$(git -C "${SKELETON_ROOT}" describe --tags --exact-match 2>/dev/null \
            || echo "0.2.0")"
 TEMPLATES_DIR="${SKELETON_ROOT}/templates"
 
-# ── Copilot Agent Configuration ─────────────────────────────────────────────
-COPILOT_MODEL="${COPILOT_MODEL:-claude-sonnet-4.6}"
+# ── Agent Configuration (provider-agnostic) ─────────────────────────────────
+COPILOT_MODEL="${COPILOT_MODEL:-claude-sonnet-4.6}"  # legacy alias honoured
+AGENT_MODEL="${AGENT_MODEL:-${COPILOT_MODEL:-claude-sonnet-4.6}}"
 COPILOT_LOG_DIR=".parallel-dev/agent-logs"
 # All 28 skills — injected into every agent prompt
 COPILOT_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, plan-management, subagent-driven-development, test-driven-development, rtk"
