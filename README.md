@@ -51,6 +51,87 @@ Define work in `docs/PLAN.md`. Let `skeleton run` execute it end-to-end through 
 
 ### Scenarios
 
+**0. Zero to running pipeline — design → plan → execute** · `a2a-brainstorm` + `skeleton plan` + `skeleton run`
+
+skeleton-parallel's natural entry point is a structured architecture document and a task plan. The recommended design-to-execution loop uses two tools in sequence:
+
+| Tool | Phase | Output |
+|------|-------|--------|
+| [a2a-brainstorm](https://github.com/okfriansyah-moh/a2a-brainstorm) | Design | `architecture.md`, `plan.md`, `readme.md` via multi-agent convergence |
+| `skeleton plan --from=plan.md` | Bridge | `docs/PLAN.md` enriched with task IDs, deps, file ownership, acceptance criteria |
+| `skeleton run --full` | Execution | Full 6-stage agentic pipeline through quality gates → PR |
+
+**Real example: idx-signal-system** — self-hosted IDX stock screening, 8 build phases (data layer, scoring engine, backtest, flow/news/sector, Tier B scout, delivery, calibration).
+
+```sh
+# ── Phase 1: Design with a2a-brainstorm ──────────────────────────────────────
+# Already done — a2a produces architecture.md + plan.md from multi-agent session.
+# The plan.md has goals, tech stack, project structure, and task definitions.
+cp ~/Downloads/idx-signal-plan.md idx-signals-systems/docs/plan.md
+
+# ── Phase 2: Bridge to skeleton execution format ──────────────────────────────
+cd idx-signals-systems
+
+# Scaffold the Python backend (additive — won't touch docs/ or existing dirs)
+skeleton init python --role=backend --root=backend/ --name=idx-signals-system
+skeleton init python --role=mcp-server --root=mcp-server/ --name=idx-signals-mcp
+
+# Wire skeleton into this existing project
+skeleton integrate        # imports docs/ → .ai/, wires config + hooks
+
+# Import and enrich the a2a plan into skeleton's execution format
+skeleton plan --from=docs/plan.md
+# reads docs/plan.md (a2a output: 8 tasks with goal, files, validation)
+# → spawns enrichment agent (claude/copilot/codex per config/skeleton.yaml)
+# → adds T-001…T-008 IDs, Depends: chain, Files: paths, Acceptance: checkboxes
+# → writes docs/PLAN.md (skeleton execution format, ready for skeleton run)
+
+# Preview the enriched plan
+skeleton run --dry-run
+
+# ── Phase 3: Validate and execute ─────────────────────────────────────────────
+skeleton doctor
+# → ✓ .ai/manifest.yaml, config/skeleton.yaml, docs/PLAN.md
+# → ✓ provider: claude → CLAUDE.md harness (or copilot/codex per config)
+# → ✓ 8 tasks in docs/PLAN.md
+# → ✓ scripts/hooks/quality-gates.sh
+
+skeleton run 1              # Phase 1 only: data layer (market_data module)
+skeleton run 1 2 3          # Phases 1–3: data + scoring + backtest runner
+skeleton run --parallel 4 5 # Phases 4 & 5 in parallel worktrees
+skeleton run --full         # all 8 phases, quality gates, auto PR
+```
+
+The 8 tasks generated for idx-signal-system:
+
+| Task | Phase | Module | Key Files |
+|------|-------|--------|-----------|
+| T-001 | Data layer | `market_data` | `backend/modules/market_data/fetchers/`, `repository.py` |
+| T-002 | Scoring engine (technicals) | `scoring` | `backend/modules/scoring/technicals.py`, `support_resistance.py` |
+| T-003 | Backtest runner | `backtest` | `backend/modules/backtest/service.py`, `run_backtest_cli.py` |
+| T-004 | Flow + corp actions + sector caps | `scoring` (extend) | `backend/modules/scoring/flow.py`, `sector_cap.py` |
+| T-005 | News/LLM tagging | `news_intelligence` | `backend/modules/news_intelligence/providers/`, `service.py` |
+| T-006 | Tier B scout + promotion | `universe` | `backend/modules/universe/liquidity_ranking.py`, `service.py` |
+| T-007 | Delivery + scheduler | `delivery`, `jobs/` | `backend/modules/delivery/telegram_bot.py`, `jobs/run_morning.py`, `scheduler/` |
+| T-008 | Calibration + Telegram approval | `calibration` | `backend/modules/calibration/service.py`, `telegram_approval.py` |
+
+**No a2a session yet?** Generate from an architecture doc directly:
+
+```sh
+# If you have docs/architecture.md but no a2a plan:
+skeleton plan --source=docs/architecture.md
+# Single-agent generation — good starting point, less architectural depth than a2a
+```
+
+```sh
+# skeleton plan flags
+skeleton plan                                  # auto-detect: a2a plan first, then arch doc
+skeleton plan --from=docs/plan.md              # import a2a-brainstorm output (recommended)
+skeleton plan --source=docs/architecture.md    # generate without a2a
+skeleton plan --from=docs/plan.md --dir=../x   # different project directory
+skeleton plan --dry-run                        # show what would run, skip agent + file write
+```
+
 **1. Start a new project from scratch** · `skeleton init`
 
 Scaffold a language-specific project with modular monolith architecture, `.ai/` knowledge, config, and hooks on day one.
@@ -371,6 +452,7 @@ skeleton run --full  # execute all pending tasks end-to-end
 | `skeleton run --dry-run`                         | Print execution plan without invoking any agents         |
 | `skeleton run --parallel`                        | One worktree per task (max speed)                        |
 | `skeleton run --sequential`                      | Strict dependency order, single branch (min cost)        |
+| `skeleton plan [--from=PLAN] [--source=DOC]`     | Bridge a2a plan or generate PLAN.md from architecture doc |
 | `skeleton integrate [--dir=DIR]`                 | Brownfield onboarding: import legacy → .ai/ → hooks      |
 | `skeleton doctor [--dir=DIR]`                    | Validate project health; check all required tools        |
 | `skeleton autoskills [--dir=DIR]`                | Detect language and install matching skill modules       |
@@ -392,6 +474,21 @@ skeleton run --full  # execute all pending tasks end-to-end
 | `--mode=MODE`   | auto-detected        | `create` · `overlay` · `respect-existing`                                  |
 | `--force`       | false                | Overwrite existing files in overlay/respect-existing mode                   |
 | `--no-agent`    | false                | Skip post-init Copilot agent spawn                                          |
+
+### `skeleton plan` flags
+
+| Flag              | Default               | Description                                                                     |
+| ----------------- | --------------------- | ------------------------------------------------------------------------------- |
+| `--from=PATH`     | auto-detected         | Import an a2a-brainstorm `plan.md` and enrich it into skeleton execution format |
+| `--source=PATH`   | auto-detected         | Generate PLAN.md from an architecture doc (when no a2a plan is available)       |
+| `--output=PATH`   | `docs/PLAN.md`        | Output path for the generated/enriched plan                                     |
+| `--dir=DIR`       | `.`                   | Target project directory                                                        |
+| `--dry-run`       | false                 | Show what would run; skip agent and file write                                  |
+| `--no-agent`      | false                 | Skip agent spawn (prints manual instructions instead)                           |
+
+Auto-detection order: `docs/plan.md` → `plan.md` → `docs/a2a-plan.md` (a2a import mode), then `docs/architecture.md` → `docs/ARCHITECTURE.md` → `docs/spec.md` → `docs/requirements.md` (generate mode).
+
+The `--from` (a2a-import) mode enriches the a2a plan with `**ID:**` (T-001…), `**Depends:**`, `**Files:**` with concrete paths, and `**Acceptance:**` checkboxes. Content is preserved — only reformatted for `plan_parser.py` compatibility.
 
 ### `skeleton run` flags
 
