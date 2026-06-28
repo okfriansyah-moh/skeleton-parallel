@@ -74,7 +74,7 @@ cp ~/Downloads/idx-signal-plan.md idx-signals-systems/docs/plan.md
 cd idx-signals-systems
 
 # Step 0 — verify provider auth before any agent spawning
-skeleton auth --provider=claude        # or copilot | codex | router_http
+skeleton auth --provider=claude        # or copilot | codex | 9router (alias: router_http)
 # → checks CLI binary is installed and authenticated
 # → exits with clear install/auth instructions if not ready
 
@@ -505,6 +505,7 @@ skeleton run --full  # execute all pending tasks end-to-end
 
 | Command                                          | Description                                              |
 | ------------------------------------------------ | -------------------------------------------------------- |
+| `skeleton auth [--provider=PROV] [--dir=DIR]`    | Pre-flight: verify provider CLI auth before init/run. Providers: `claude` \| `copilot` \| `codex` \| `9router` (alias: `router_http`) |
 | `skeleton init <lang> [--name=NAME] [--dir=DIR]` | Scaffold a new project from a language template          |
 | `skeleton init <lang> --role=ROLE --root=PATH`   | Additive init into a planned multi-role architecture     |
 | `skeleton run [tasks…] [flags]`                  | Execute PLAN.md tasks through the full pipeline          |
