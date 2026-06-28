@@ -3005,12 +3005,17 @@ cmd_auth() {
                 echo "Verify agent provider auth before running skeleton commands."
                 echo "If no --provider, reads config/skeleton.yaml in DIR."
                 echo ""
-                echo "Providers: claude | copilot | codex | router_http"
+                echo "Providers: claude | copilot | codex | router_http (alias: 9router | router)"
                 return 0 ;;
         esac
     done
 
     [[ -z "${_provider}" ]] && _provider="$(_detect_provider_for_dir "${_dir}")"
+
+    # Normalise 9router / router → router_http
+    case "${_provider}" in
+        9router|router) _provider="router_http" ;;
+    esac
 
     log_info "Auth check — provider: ${BOLD}${_provider}${NC}"
     echo ""
@@ -3081,28 +3086,32 @@ cmd_auth() {
             fi
             ;;
         router_http)
-            log_info "driver: router_http — checking 9router daemon..."
+            log_info "Checking 9router daemon at localhost:20128..."
             if curl -sf "http://localhost:20128/health" &>/dev/null 2>&1; then
-                log_ok "9router: running at localhost:20128"
+                log_ok "9router: running"
             else
                 log_error "9router: not responding at localhost:20128"
                 echo ""
                 echo "  Start 9router:"
-                echo "    skeleton router install   # first time only"
+                echo "    skeleton router install   # first time only (requires Node 22.13+)"
                 echo "    skeleton router start"
                 echo "    skeleton router status"
                 _ok=false
             fi
             local _inject="${_dir}/router/inject-env.sh"
             if [[ -f "${_inject}" ]]; then
-                log_ok "router/inject-env.sh: found"
+                log_ok "inject-env.sh: found (${_inject})"
             else
-                log_warn "router/inject-env.sh: not found"
+                log_warn "inject-env.sh: not found at ${_inject}"
                 echo ""
-                echo "  Create ${_inject} with your API keys:"
+                echo "  After starting 9router, open http://localhost:20128 → Connections"
+                echo "  → add Claude → copy the token, then create ${_inject}:"
                 echo "    export ANTHROPIC_BASE_URL=\"http://localhost:20128/v1\""
-                echo "    export ANTHROPIC_API_KEY=\"<your-key>\""
-                echo "    chmod 600 router/inject-env.sh"
+                echo "    export ANTHROPIC_API_KEY=\"<token>\""
+                echo "    chmod 600 ${_inject}"
+                echo ""
+                echo "  Tip: if your project is elsewhere, use:"
+                echo "    skeleton auth --provider=9router --dir=/path/to/your-project"
             fi
             ;;
         *)
