@@ -3599,6 +3599,7 @@ cmd_help() {
     add skill <name>          Add a skill to current project
     add agent <name>          Add an agent to current project
     list [skills|agents|templates]  List available resources
+    router <subcommand>       Manage 9router daemon (install|start|stop|status|health|oauth)
     plan [--from=PLAN]        Bridge a2a-brainstorm plan into skeleton execution format
     plan [--source=DOC]       Generate docs/PLAN.md from architecture doc (no a2a required)
     sync [--dir=DIR]          Force-sync all skills/agents/scripts from upstream
@@ -3646,6 +3647,10 @@ cmd_help() {
     skeleton plan --from=docs/plan.md           # import a2a-brainstorm output
     skeleton plan --source=docs/architecture.md # generate without a2a
     skeleton plan --dry-run
+    skeleton router install
+    skeleton router start
+    skeleton router status
+    skeleton router oauth
     skeleton autoskills --dir=../existing-project --dry-run
     skeleton autoskills -y
 
@@ -3680,6 +3685,7 @@ main() {
         list)       cmd_list "$@" ;;
         sync)       cmd_sync "$@" ;;
         plan)       cmd_plan "$@" ;;
+        router)     bash "${SKELETON_ROOT}/router/wrap.sh" "$@" ;;
         version)    cmd_version ;;
         help|-h|--help) cmd_help ;;
         *)          die "Unknown command: ${command}\nRun 'skeleton help' for usage." ;;

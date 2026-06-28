@@ -235,7 +235,42 @@ skeleton run --dry-run --plan docs/PLAN.md 1 2 3
 skeleton run --dry-run --parallel
 ```
 
-**5. Onboard an existing repo** · `skeleton integrate`
+**5. Set up 9router for multi-provider routing** · `skeleton router`
+
+9router is a local daemon that proxies agent calls through a single OpenAI-compatible endpoint, enabling quota rotation, provider fallback, and OAuth token management. Required only when `driver: router_http` in `config/skeleton.yaml`.
+
+```sh
+skeleton router install   # install 9router via npm (requires Node 22.13+)
+skeleton router start     # start daemon on localhost:20128
+skeleton router status    # verify: Running: yes, Health: OK
+skeleton router oauth     # print OAuth setup guide for each provider
+```
+
+After `start`, open `http://localhost:20128` → **Connections** → add your provider (Claude, Copilot, Codex) → copy the token into `router/inject-env.sh`:
+
+```bash
+# router/inject-env.sh  (chmod 600, never commit)
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_API_KEY="<your-key>"
+```
+
+Then set `driver: router_http` in `config/skeleton.yaml`:
+
+```yaml
+execution:
+  driver: router_http
+router:
+  combo: project-default   # combo configured in 9router dashboard
+```
+
+```sh
+skeleton router health    # confirm the daemon is responding
+skeleton router stop      # stop daemon when done
+```
+
+Skip this step entirely if using `driver: cli_subscription` (claude/copilot/codex CLI direct — no daemon needed).
+
+**6. Onboard an existing repo** · `skeleton integrate`
 
 Your repo already has `.github/copilot-instructions.md`, agents, or hooks. Import everything into `.ai/`, wire the router, and regenerate hooks.
 
@@ -245,7 +280,7 @@ skeleton integrate           # runs full Appendix A checklist
 skeleton integrate --dir=./path/to/repo
 ```
 
-**6. Validate project health** · `skeleton doctor`
+**7. Validate project health** · `skeleton doctor`
 
 Provider-agnostic health check. Validates `.ai/manifest.yaml` (ARES canonical source), `config/skeleton.yaml`, skills/agents from `.ai/` (`.github/` as legacy fallback), pipeline infra, and the harness file for your configured provider (Copilot → `.github/copilot-instructions.md`, Claude → `CLAUDE.md`, Codex → `AGENTS.md`, Cursor → `.cursor/rules/`).
 
@@ -254,7 +289,7 @@ skeleton doctor              # checks current directory
 skeleton doctor --dir=../my-project
 ```
 
-**7. Upgrade an existing project** · `skeleton upgrade`
+**8. Upgrade an existing project** · `skeleton upgrade`
 
 Pull the latest framework files (scripts, templates, agents) into a project without overwriting your customizations.
 
@@ -265,7 +300,7 @@ skeleton upgrade --mode=replace         # full replacement
 skeleton upgrade --dir=../my-project --no-agent
 ```
 
-**8. Auto-detect stack and install matching skills** · `skeleton autoskills`
+**9. Auto-detect stack and install matching skills** · `skeleton autoskills`
 
 Scans the project's language, frameworks, and tools, then installs the matching skill modules into `.ai/skills/` (ARES canonical source).
 
@@ -276,7 +311,7 @@ skeleton autoskills --dry-run           # preview only
 skeleton autoskills -y                  # skip confirmation prompts
 ```
 
-**9. Add a skill or agent to a project** · `skeleton add`
+**10. Add a skill or agent to a project** · `skeleton add`
 
 Install a single named skill or agent from the skeleton-parallel registry into `.ai/skills/` or `.ai/agents/` (ARES canonical source). After adding, run `ars compose --target <provider>` to update your provider harness.
 
@@ -287,7 +322,7 @@ skeleton add agent test-builder      # installs to .ai/agents/
 skeleton add agent conflict-resolver
 ```
 
-**10. Browse available resources** · `skeleton list`
+**11. Browse available resources** · `skeleton list`
 
 List all skills, agents, or language templates available in the registry.
 
@@ -297,7 +332,7 @@ skeleton list agents
 skeleton list templates
 ```
 
-**11. Sync skills and agents from upstream** · `skeleton sync`
+**12. Sync skills and agents from upstream** · `skeleton sync`
 
 Sync all skills, agents, and prompts from the skeleton-parallel upstream into `.ai/` (ARES canonical source), then run `ars compose --target <provider>` to regenerate your provider harness. If `ars` is not installed, skeleton will offer to install it automatically.
 
@@ -306,7 +341,7 @@ skeleton sync                     # sync to .ai/ + compose provider harness
 skeleton sync --dir=../my-project
 ```
 
-**12. Compose provider harness from `.ai/` knowledge** · `ars compose`
+**13. Compose provider harness from `.ai/` knowledge** · `ars compose`
 
 skeleton-parallel uses [ARES](https://github.com/okfriansyah-moh/ares) (AI Repository Standard) as the canonical knowledge layer. Skills, agents, instructions, and prompts live in `.ai/` and are compiled into provider-specific harness files by the `ars` CLI.
 
@@ -325,7 +360,7 @@ ars import claude   # import CLAUDE.md → .ai/
 ars validate        # check .ai/ structure
 ```
 
-**13. Regenerate hook templates** · `skeleton hooks regenerate`
+**14. Regenerate hook templates** · `skeleton hooks regenerate`
 
 Copy the language-appropriate hook templates (`quality-gates.sh`, `acceptance-gates.sh`) into `scripts/hooks/`.
 
@@ -334,7 +369,7 @@ skeleton hooks regenerate
 skeleton hooks regenerate --dir=../my-project
 ```
 
-**15. Check pipeline state** · `skeleton status`
+**16. Check pipeline state** · `skeleton status`
 
 Print the current run state from `.skeleton-dev/run-status.json` — which stages passed, failed, or are in progress.
 
@@ -342,7 +377,7 @@ Print the current run state from `.skeleton-dev/run-status.json` — which stage
 skeleton status
 ```
 
-**16. Clean up worktrees and branches** · `skeleton cleanup`
+**17. Clean up worktrees and branches** · `skeleton cleanup`
 
 Remove all parallel worktrees, stale task branches, and reset `.skeleton-dev/` state after a run.
 
@@ -351,7 +386,7 @@ skeleton cleanup             # prompt before removing
 skeleton cleanup --force     # no prompts
 ```
 
-**17. CI with bounded retries and automatic rollback** · `skeleton run --full`
+**18. CI with bounded retries and automatic rollback** · `skeleton run --full`
 
 Each task gets a git checkpoint before execution. On retry exhaustion the branch rolls back automatically.
 
@@ -362,7 +397,7 @@ skeleton run --full
 # On acceptance fail:     feedback router re-routes to the correct fix path
 ```
 
-**18. Migrate from `run_parallel.sh` + `config/phases.yaml`** · `skeleton run`
+**19. Migrate from `run_parallel.sh` + `config/phases.yaml`** · `skeleton run`
 
 The old phase-based orchestrator still works via a compatibility shim. Migrate when ready.
 
@@ -374,7 +409,7 @@ The old phase-based orchestrator still works via a compatibility shim. Migrate w
 skeleton run 1 2 3
 ```
 
-**19. Check version or get help** · `skeleton version` · `skeleton help`
+**20. Check version or get help** · `skeleton version` · `skeleton help`
 
 ```sh
 skeleton version     # print installed version (derived from git tag)
@@ -454,6 +489,7 @@ skeleton run --full  # execute all pending tasks end-to-end
 | `skeleton run --parallel`                        | One worktree per task (max speed)                        |
 | `skeleton run --sequential`                      | Strict dependency order, single branch (min cost)        |
 | `skeleton plan [--from=PLAN] [--source=DOC]`     | Bridge a2a plan or generate PLAN.md from architecture doc |
+| `skeleton router <subcommand>`                   | Manage 9router daemon (install, start, stop, status, oauth) |
 | `skeleton integrate [--dir=DIR]`                 | Brownfield onboarding: import legacy → .ai/ → hooks      |
 | `skeleton doctor [--dir=DIR]`                    | Validate project health; check all required tools        |
 | `skeleton autoskills [--dir=DIR]`                | Detect language and install matching skill modules       |
