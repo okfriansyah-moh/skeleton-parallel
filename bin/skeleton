@@ -85,26 +85,60 @@ _validate_project_name() {
     fi
 }
 
-# ── Copilot Agent Helpers ────────────────────────────────────────────────────
+# ── Agent Helpers (provider-agnostic, ARES-aligned) ─────────────────────────
 
-# Check if Copilot CLI is available — required for agent-first workflow
-_check_copilot_available() {
-    if command -v copilot &>/dev/null; then
-        return 0
+# Detect the configured AI provider for a given project directory.
+# Reads config/skeleton.yaml; defaults to "copilot" for backward compatibility.
+_detect_provider_for_dir() {
+    local dir="${1:-.}"
+    local p=""
+    if [[ -f "${dir}/config/skeleton.yaml" ]]; then
+        p="$(grep -E '^\s*provider\s*:' "${dir}/config/skeleton.yaml" \
+            2>/dev/null | head -1 | sed 's/.*://;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
     fi
-    return 1
+    echo "${p:-copilot}"
 }
 
-# Require Copilot CLI — die if not found
-_require_copilot() {
-    if ! _check_copilot_available; then
-        die "Copilot CLI is required. Install with: npm install -g @githubnext/github-copilot-cli\nAlternative: use --no-agent to skip agent validation."
+# Return the ARES-composed harness file path for a given provider.
+# These files are ARES outputs — skeleton reads them, never writes them.
+_provider_harness_file() {
+    case "${1:-copilot}" in
+        copilot)     echo ".github/copilot-instructions.md" ;;
+        claude)      echo "CLAUDE.md" ;;
+        codex)       echo "AGENTS.md" ;;
+        cursor)      echo ".cursor/rules/" ;;
+        antigravity) echo ".antigravity/" ;;
+        *)           echo ".ai/manifest.yaml" ;;
+    esac
+}
+
+# Check whether the CLI binary for the given provider is available.
+_check_agent_cli_available() {
+    local provider="${1:-copilot}"
+    case "${provider}" in
+        copilot) command -v copilot &>/dev/null ;;
+        claude)  command -v claude  &>/dev/null ;;
+        codex)   command -v codex   &>/dev/null ;;
+        *)       return 0 ;;  # sdk_cursor / router_http — no binary needed
+    esac
+}
+
+# Die with a provider-specific install hint if the CLI binary is missing.
+_require_agent_cli() {
+    local provider="${1:-copilot}"
+    if ! _check_agent_cli_available "${provider}"; then
+        case "${provider}" in
+            copilot) die "copilot CLI not found. Install: npm install -g @githubnext/github-copilot-cli\nAlternative: use --no-agent to skip." ;;
+            claude)  die "claude CLI not found. Install: https://claude.ai/code\nAlternative: use --no-agent to skip." ;;
+            codex)   die "codex CLI not found. Install: https://platform.openai.com/codex\nAlternative: use --no-agent to skip." ;;
+            *)       die "No CLI binary available for provider '${provider}'. Use --no-agent to skip." ;;
+        esac
     fi
 }
 
-# Spawn a Copilot agent in foreground (blocking — waits for completion)
-# Usage: _spawn_copilot_agent <work_dir> <agent_name> <prompt> [log_label]
-_spawn_copilot_agent() {
+# Spawn an agent in the foreground (blocking) using the project's configured provider.
+# Usage: _spawn_agent <work_dir> <agent_name> <prompt> [log_label]
+_spawn_agent() {
     local work_dir="$1"
     local agent_name="$2"
     local prompt="$3"
@@ -115,26 +149,61 @@ _spawn_copilot_agent() {
         return 0
     fi
 
-    _require_copilot
+    local provider; provider="$(_detect_provider_for_dir "${work_dir}")"
+    local harness_file; harness_file="$(_provider_harness_file "${provider}")"
+    local full_prompt="${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow constraints in ${harness_file} (ARES-composed harness). ${COPILOT_WORKSPACE_CONSTRAINT}"
 
     local log_dir="${work_dir}/${COPILOT_LOG_DIR}"
     mkdir -p "${log_dir}"
     local log_file="${log_dir}/${log_label}-$(date +%Y%m%d-%H%M%S).log"
 
-    log_step "Spawning agent: ${BOLD}${agent_name}${NC} (model: ${COPILOT_MODEL})"
+    log_step "Spawning agent: ${BOLD}${agent_name}${NC} (provider: ${provider}, model: ${AGENT_MODEL})"
 
-    (
-        cd "${work_dir}"
-        copilot \
-            -p "${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow all constraints in .github/copilot-instructions.md. ${COPILOT_WORKSPACE_CONSTRAINT}" \
-            --agent="${agent_name}" \
-            --model="${COPILOT_MODEL}" \
-            --no-ask-user \
-            --allow-all-tools \
-            --autopilot \
-            2>&1 | tee "${log_file}"
-    )
-    local exit_code=${PIPESTATUS[0]:-$?}
+    local exit_code=0
+    case "${provider}" in
+        copilot)
+            _require_agent_cli "copilot"
+            (
+                cd "${work_dir}"
+                copilot \
+                    -p "${full_prompt}" \
+                    --agent="${agent_name}" \
+                    --model="${AGENT_MODEL}" \
+                    --no-ask-user \
+                    --allow-all-tools \
+                    --autopilot \
+                    2>&1 | tee "${log_file}"
+            )
+            exit_code=${PIPESTATUS[0]:-$?}
+            ;;
+        claude)
+            _require_agent_cli "claude"
+            (
+                cd "${work_dir}"
+                claude \
+                    -p "${full_prompt}" \
+                    --model="${AGENT_MODEL}" \
+                    --allowedTools all \
+                    --non-interactive \
+                    2>&1 | tee "${log_file}"
+            )
+            exit_code=${PIPESTATUS[0]:-$?}
+            ;;
+        codex)
+            _require_agent_cli "codex"
+            (
+                cd "${work_dir}"
+                codex \
+                    -p "${full_prompt}" \
+                    2>&1 | tee "${log_file}"
+            )
+            exit_code=${PIPESTATUS[0]:-$?}
+            ;;
+        *)
+            log_warn "Provider '${provider}' — foreground agent CLI not implemented; skipping"
+            return 0
+            ;;
+    esac
 
     if [[ ${exit_code} -eq 0 ]]; then
         log_ok "Agent ${agent_name} completed successfully"
@@ -144,9 +213,9 @@ _spawn_copilot_agent() {
     return ${exit_code}
 }
 
-# Spawn a Copilot agent in background (non-blocking — returns immediately)
-# Usage: _spawn_copilot_agent_bg <work_dir> <agent_name> <prompt> [log_label]
-_spawn_copilot_agent_bg() {
+# Spawn an agent in the background (non-blocking) using the project's configured provider.
+# Usage: _spawn_agent_bg <work_dir> <agent_name> <prompt> [log_label]
+_spawn_agent_bg() {
     local work_dir="$1"
     local agent_name="$2"
     local prompt="$3"
@@ -156,31 +225,76 @@ _spawn_copilot_agent_bg() {
         return 0
     fi
 
-    if ! _check_copilot_available; then
-        log_warn "Copilot CLI not found — skipping background agent"
+    local provider; provider="$(_detect_provider_for_dir "${work_dir}")"
+
+    if ! _check_agent_cli_available "${provider}"; then
+        log_warn "${provider} CLI not found — skipping background agent"
         return 0
     fi
+
+    local harness_file; harness_file="$(_provider_harness_file "${provider}")"
+    local full_prompt="${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow constraints in ${harness_file} (ARES-composed harness). ${COPILOT_WORKSPACE_CONSTRAINT}"
 
     local log_dir="${work_dir}/${COPILOT_LOG_DIR}"
     mkdir -p "${log_dir}"
     local log_file="${log_dir}/${log_label}-$(date +%Y%m%d-%H%M%S).log"
 
-    log_info "Spawning background agent: ${agent_name} (log: ${log_file})"
+    log_info "Spawning background agent: ${agent_name} (provider: ${provider}, log: ${log_file})"
 
-    (
-        cd "${work_dir}"
-        copilot \
-            -p "${prompt} MANDATORY: Use skills as primary knowledge source (${COPILOT_SKILLS}). Follow all constraints in .github/copilot-instructions.md. ${COPILOT_WORKSPACE_CONSTRAINT}" \
-            --agent="${agent_name}" \
-            --model="${COPILOT_MODEL}" \
-            --no-ask-user \
-            --allow-all-tools \
-            --autopilot \
-            &>"${log_file}"
-    ) &
+    case "${provider}" in
+        copilot)
+            (
+                cd "${work_dir}"
+                copilot \
+                    -p "${full_prompt}" \
+                    --agent="${agent_name}" \
+                    --model="${AGENT_MODEL}" \
+                    --no-ask-user \
+                    --allow-all-tools \
+                    --autopilot \
+                    &>"${log_file}"
+            ) &
+            ;;
+        claude)
+            (
+                cd "${work_dir}"
+                claude \
+                    -p "${full_prompt}" \
+                    --model="${AGENT_MODEL}" \
+                    --allowedTools all \
+                    --non-interactive \
+                    &>"${log_file}"
+            ) &
+            ;;
+        codex)
+            (
+                cd "${work_dir}"
+                codex \
+                    -p "${full_prompt}" \
+                    &>"${log_file}"
+            ) &
+            ;;
+        *)
+            log_warn "Provider '${provider}' — background agent CLI not implemented; skipping"
+            return 0
+            ;;
+    esac
     local bg_pid=$!
     log_info "Background agent PID: ${bg_pid}"
 }
+
+# ── Backward-compatible aliases (keep all existing call sites unchanged) ──────
+_spawn_copilot_agent()    { _spawn_agent    "$@"; }
+_spawn_copilot_agent_bg() { _spawn_agent_bg "$@"; }
+_check_copilot_available() {
+    local dir="${1:-.}"
+    _check_agent_cli_available "$(_detect_provider_for_dir "${dir}")"
+}
+_require_copilot() {
+    local dir="${1:-.}"
+    _require_agent_cli "$(_detect_provider_for_dir "${dir}")"
+}
+
 
 # Detect existing skeleton-parallel mechanisms in a directory
 # Returns space-separated list of found mechanisms
@@ -2333,9 +2447,11 @@ _add_skill() {
         die "Skill '${name}' not found.\nAvailable: $(get_available_skills | tr '\n' ' ')"
     fi
 
-    mkdir -p "${dest}/.github/skills"
-    cp -R "${src}" "${dest}/.github/skills/"
-    log_ok "Skill '${name}' installed to ${dest}/.github/skills/${name}/"
+    # Install to .ai/skills/ — ARES canonical source
+    mkdir -p "${dest}/.ai/skills"
+    cp -R "${src}" "${dest}/.ai/skills/"
+    log_ok "Skill '${name}' installed to ${dest}/.ai/skills/${name}/"
+    log_info "  Run 'ars compose --target <provider>' to update your provider harness."
 }
 
 _add_agent() {
@@ -2346,9 +2462,11 @@ _add_agent() {
         die "Agent '${name}' not found.\nAvailable: $(get_available_agents | tr '\n' ' ')"
     fi
 
-    mkdir -p "${dest}/.github/agents"
-    cp "${src}" "${dest}/.github/agents/"
-    log_ok "Agent '${name}' installed to ${dest}/.github/agents/${name}.agent.md"
+    # Install to .ai/agents/ — ARES canonical source
+    mkdir -p "${dest}/.ai/agents"
+    cp "${src}" "${dest}/.ai/agents/"
+    log_ok "Agent '${name}' installed to ${dest}/.ai/agents/${name}.agent.md"
+    log_info "  Run 'ars compose --target <provider>' to update your provider harness."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2429,52 +2547,77 @@ cmd_sync() {
     log_info "Target:       ${BOLD}${target_dir}${NC}"
     echo ""
 
-    # Force-sync all framework files
     # Guard: ensure target_dir is set and non-empty
     [[ -z "${target_dir}" ]] && die "Target directory is empty — aborting sync"
     [[ ! -d "${target_dir}" ]] && die "Target directory does not exist: ${target_dir}"
 
-    log_step "Syncing skills..."
+    # ── Sync skills, agents, prompts → .ai/ (ARES canonical source) ──────────
+    log_step "Syncing skills → .ai/skills/ (ARES canonical)..."
     if [[ -d "${SKELETON_ROOT}/.github/skills" ]]; then
-        [[ -d "${target_dir}/.github/skills" ]] && rm -rf "${target_dir}/.github/skills"
-        mkdir -p "${target_dir}/.github"
-        cp -R "${SKELETON_ROOT}/.github/skills" "${target_dir}/.github/"
-        log_ok "Skills synced"
+        mkdir -p "${target_dir}/.ai/skills"
+        cp -R "${SKELETON_ROOT}/.github/skills/." "${target_dir}/.ai/skills/"
+        log_ok "Skills synced to .ai/skills/"
     fi
 
-    log_step "Syncing agents..."
+    log_step "Syncing agents → .ai/agents/ (ARES canonical)..."
     if [[ -d "${SKELETON_ROOT}/.github/agents" ]]; then
-        [[ -d "${target_dir}/.github/agents" ]] && rm -rf "${target_dir}/.github/agents"
-        mkdir -p "${target_dir}/.github"
-        cp -R "${SKELETON_ROOT}/.github/agents" "${target_dir}/.github/"
-        log_ok "Agents synced"
+        mkdir -p "${target_dir}/.ai/agents"
+        cp -R "${SKELETON_ROOT}/.github/agents/." "${target_dir}/.ai/agents/"
+        log_ok "Agents synced to .ai/agents/"
     fi
 
-    log_step "Syncing prompts..."
+    log_step "Syncing prompts → .ai/prompts/ (ARES canonical)..."
     if [[ -d "${SKELETON_ROOT}/.github/prompts" ]]; then
-        [[ -d "${target_dir}/.github/prompts" ]] && rm -rf "${target_dir}/.github/prompts"
-        mkdir -p "${target_dir}/.github"
-        cp -R "${SKELETON_ROOT}/.github/prompts" "${target_dir}/.github/"
-        log_ok "Prompts synced"
+        mkdir -p "${target_dir}/.ai/prompts"
+        cp -R "${SKELETON_ROOT}/.github/prompts/." "${target_dir}/.ai/prompts/"
+        log_ok "Prompts synced to .ai/prompts/"
     fi
 
     log_step "Syncing run_parallel.sh..."
     mkdir -p "${target_dir}/scripts"
-    cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${target_dir}/scripts/"
-    chmod +x "${target_dir}/scripts/run_parallel.sh"
-    log_ok "run_parallel.sh synced"
+    if [[ -f "${SKELETON_ROOT}/scripts/run_parallel.sh" ]]; then
+        cp "${SKELETON_ROOT}/scripts/run_parallel.sh" "${target_dir}/scripts/"
+        chmod +x "${target_dir}/scripts/run_parallel.sh"
+        log_ok "run_parallel.sh synced"
+    fi
 
-    log_step "Syncing copilot-instructions.md..."
-    cp "${SKELETON_ROOT}/.github/copilot-instructions.md" "${target_dir}/.github/"
-    log_ok "copilot-instructions.md synced"
+    echo ""
+    log_ok "Knowledge synced to .ai/ — now composing provider harness via ARES..."
+    echo ""
+
+    # ── Compose provider harness (ARES owns this) ─────────────────────────────
+    local _sync_provider; _sync_provider="$(_detect_provider_for_dir "${target_dir}")"
+    if command -v ars &>/dev/null; then
+        log_step "Running: ars compose --target ${_sync_provider}"
+        ( cd "${target_dir}" && ars compose --target "${_sync_provider}" 2>&1 )             && log_ok "Provider harness composed via ars (target: ${_sync_provider})"             || log_warn "ars compose failed — run manually: ars compose --target ${_sync_provider}"
+    else
+        log_warn "ars CLI not found — it is required to compose the provider harness."
+        log_info "  Install: curl -fsSL https://github.com/okfriansyah-moh/ares/releases/latest/download/install.sh | bash"
+        echo ""
+        local _install_ars=""
+        # shellcheck disable=SC2162
+        read -r -p "  Install ars now and compose the harness? [y/N] " _install_ars
+        if [[ "${_install_ars}" =~ ^[Yy]$ ]]; then
+            log_step "Installing ars..."
+            if curl -fsSL https://github.com/okfriansyah-moh/ares/releases/latest/download/install.sh | bash; then
+                log_ok "ars installed"
+                ( cd "${target_dir}" && ars compose --target "${_sync_provider}" 2>&1 )                     && log_ok "Provider harness composed (target: ${_sync_provider})"                     || log_warn "ars compose failed — run manually: ars compose --target ${_sync_provider}"
+            else
+                log_error "ars installation failed — see https://github.com/okfriansyah-moh/ares"
+            fi
+        else
+            log_info "Skipping ars install. Provider harness not composed."
+            log_info "Run when ready: ars compose --target ${_sync_provider}"
+        fi
+    fi
 
     echo ""
     log_ok "Sync complete!"
     echo ""
 
-    # Background agent validates sync results
-    _spawn_copilot_agent_bg "${target_dir}" "doctor" \
-        "Validate post-sync state: 1) All skills match upstream (${SKELETON_ROOT}). 2) All agents match upstream. 3) run_parallel.sh is current and executable. 4) copilot-instructions.md is current. 5) No custom configurations were accidentally overwritten. Report findings in .parallel-dev/agent-logs/." \
+    # Background validation (provider-aware)
+    _spawn_agent_bg "${target_dir}" "doctor" \
+        "Validate post-sync state: 1) .ai/skills/ and .ai/agents/ match upstream (${SKELETON_ROOT}). 2) Provider harness file is current (run 'ars compose' if stale). 3) run_parallel.sh is executable. 4) No custom configurations were accidentally overwritten. Report findings in .parallel-dev/agent-logs/." \
         "sync-validation"
 }
 
