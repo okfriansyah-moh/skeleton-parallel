@@ -1,4 +1,0 @@
-{"type": "task_start", "timestamp": "2026-06-27T04:18:03Z", "task": 1}
-{"type": "task_rollback", "timestamp": "2026-06-27T06:05:00Z", "task": 99, "reason": "task-runner exceeded 5 retries"}
-{"type": "task_rollback", "timestamp": "2026-06-28T07:01:33Z", "task": 1, "reason": "T1 quality gates failed after 3 attempts"}
-{"type": "task_rollback", "timestamp": "2026-06-28T11:04:02Z", "task": 1, "reason": "T1 quality gates failed after 3 attempts"}
