@@ -381,15 +381,15 @@ main() {
 
     case "${subcommand}" in
         install) router_install "$@" ;;
-        start)   router_start ;;
-        stop)    router_stop ;;
-        status)  router_status ;;
-        health)  router_health ;;
-        check)   router_check ;;
-        oauth)   router_oauth "$@" ;;
+        start)        router_start ;;
+        stop|down)    router_stop ;;
+        status)       router_status ;;
+        health)       router_health ;;
+        check)        router_check ;;
+        oauth)        router_oauth "$@" ;;
         *)
             log_error "[router] Unknown subcommand: ${subcommand}"
-            log_info "  Usage: skeleton router <install|start|stop|status|health|check|oauth>"
+            log_info "  Usage: skeleton router <install|start|stop|down|status|health|check|oauth>"
             exit 1
             ;;
     esac
