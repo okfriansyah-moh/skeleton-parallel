@@ -78,19 +78,22 @@ ${AGENT_WORKSPACE_CONSTRAINT}"
 
     log_step "[${stage}] cli_subscription/claude (model: ${model})"
 
-    # ── Claude Code CLI invocation — non-interactive mode ─────────────────────
-    # Claude Code CLI flags:
-    #   --non-interactive   Disable interactive prompts (CI/automation mode)
-    #   -p TEXT             Task/prompt to execute
-    #   --model MODEL       Model identifier
-    #   --allowedTools all  Allow all tools (equivalent to --allow-all-tools)
+    # ── Claude Code CLI invocation — fully autonomous, zero human-in-the-loop ───
+    # Flags:
+    #   --non-interactive              CI/automation mode, no TTY prompts
+    #   --dangerously-skip-permissions Bypass ALL tool permission checks (bash,
+    #                                  file writes, etc.) — required for full auto
+    #   --allowedTools all             Pre-approve every tool category
+    #   -p TEXT                        Task prompt (non-interactive requires -p)
+    #   --model MODEL                  Model identifier
     (
         cd "${work_dir}"
         claude \
             --non-interactive \
+            --dangerously-skip-permissions \
+            --allowedTools "all" \
             -p "${full_prompt}" \
             --model="${model}" \
-            --allowedTools "all" \
             2>&1 | tee "${log_file}"
     )
     local exit_code=${PIPESTATUS[0]}
