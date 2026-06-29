@@ -86,17 +86,44 @@ _validate_project_name() {
     fi
 }
 
-# ── Shared spinner (used by _spawn_agent and _plan_spawn_agent) ──────────────
-# Usage: _skeleton_spinner <pid>  — shows braille spinner until pid exits
-_skeleton_spinner() {
-    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
-    local i=0
-    while kill -0 "$1" 2>/dev/null; do
-        printf '\r  %s  Working...' "${frames[$((i % 10))]}"
-        (( i++ )) || true
+# ── Shared progress monitor ───────────────────────────────────────────────────
+# Phase 1: braille spinner while the log file is empty (agent is thinking).
+# Phase 2: live tail once output starts appearing in the log file.
+# Usage: _run_with_progress <pid> <log_file>
+# Returns the exit code of <pid>.
+_run_with_progress() {
+    local _rp_pid="$1" _rp_log="$2"
+
+    # Phase 1 — spinner until the log has content
+    local _f=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏') _i=0
+    while kill -0 "${_rp_pid}" 2>/dev/null && [[ ! -s "${_rp_log}" ]]; do
+        printf '\r  %s  Working...' "${_f[$((_i % 10))]}"
+        (( _i++ )) || true
         sleep 0.12
     done
-    printf '\r\033[K'  # clear spinner line
+    printf '\r\033[K'
+
+    # Phase 2 — live tail while agent is still running
+    local _rp_tail=""
+    if kill -0 "${_rp_pid}" 2>/dev/null && [[ -s "${_rp_log}" ]]; then
+        tail -f "${_rp_log}" 2>/dev/null &
+        _rp_tail=$!
+    fi
+
+    # Wait for agent to finish
+    wait "${_rp_pid}"; local _rp_ec=$?
+
+    if [[ -n "${_rp_tail}" ]]; then
+        sleep 0.3   # let tail flush any last lines
+        kill "${_rp_tail}" 2>/dev/null
+        wait "${_rp_tail}" 2>/dev/null
+        printf '\033[K'
+    else
+        # Agent finished before producing output — cat the full log now
+        [[ -s "${_rp_log}" ]] && cat "${_rp_log}"
+    fi
+
+    return "${_rp_ec}"
 }
 
 # ── Agent Helpers (provider-agnostic, ARES-aligned) ─────────────────────────
@@ -194,7 +221,6 @@ _spawn_agent() {
         claude)
             _require_agent_cli "claude"
             log_info "  Log: ${log_file}"
-            log_info "  (this may take 1-3 min — tail -f \"${log_file}\" to follow)"
             (
                 cd "${work_dir}"
                 claude \
@@ -203,12 +229,7 @@ _spawn_agent() {
                     --allowedTools all \
                     2>&1
             ) > "${log_file}" &
-            local _claude_pid=$!
-            _skeleton_spinner "${_claude_pid}"
-            wait "${_claude_pid}"; exit_code=$?
-            if [[ -s "${log_file}" ]]; then
-                cat "${log_file}"
-            fi
+            _run_with_progress $! "${log_file}"; exit_code=$?
             ;;
         codex)
             _require_agent_cli "codex"
@@ -3416,9 +3437,8 @@ _plan_spawn_agent() {
                   --model="${AGENT_MODEL}" \
                   --allowedTools none \
                   2>&1
-            ) > "${_agent_out}" || true &
-            _skeleton_spinner $!
-            wait $! || true
+            ) > "${_agent_out}" &
+            _run_with_progress $! "${_agent_out}" || true
             ;;
         copilot)
             ( cd "${_work_dir}"
