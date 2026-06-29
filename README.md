@@ -126,10 +126,10 @@ skeleton router health              # confirm 9router is up
 skeleton auth --provider=9router    # full pre-flight pass (should show ✓ for both)
 
 # ── Step 6: Enrich PLAN.md for skeleton execution ─────────────────────────────
-# skeleton plan uses claude CLI's own OAuth directly (bypasses 9router entirely).
-# inject-env.sh is NOT sourced here — plan unsets ANTHROPIC_BASE_URL internally.
+# Source inject-env.sh first — skeleton plan routes through 9router like all other commands.
+source router/inject-env.sh
 skeleton plan --from=docs/PLAN.md
-# → reads docs/PLAN.md, spawns claude agent (direct OAuth, no 9router)
+# → reads docs/PLAN.md, spawns claude agent routed through 9router (cc/claude-sonnet-4-6)
 # → adds T-001…T-018 IDs, Depends:, Files:, Acceptance: checkboxes
 # → rewrites docs/PLAN.md in skeleton execution format (spinner + live tail shown)
 
@@ -359,7 +359,7 @@ chmod 600 router/inject-env.sh
 
 > **What is `ANTHROPIC_API_KEY` here?** It is the key 9router generated for its own local endpoint — visible on the **Endpoint & Key** page of the dashboard. It is NOT your Anthropic API key. Your actual Anthropic API key (or Claude Code OAuth) lives in 9router's **Providers** page. With "Require API key" off in 9router, any non-empty value works; using the 9router-generated key is the recommended approach.
 
-> **Note on `skeleton plan`:** The `skeleton plan` command bypasses 9router entirely — it unsets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` internally so the claude CLI uses its own OAuth directly. You do not need to `source inject-env.sh` before `skeleton plan`. All other commands (`skeleton doctor`, `skeleton run`) do route through 9router and require the env vars.
+> **All agent-spawning commands route through 9router.** `source router/inject-env.sh` before `skeleton plan`, `skeleton doctor`, and `skeleton run`. The env vars set `ANTHROPIC_BASE_URL=http://localhost:20128/v1` so every claude CLI call is proxied through 9router using your configured combo and Claude Code OAuth.
 
 **Set `driver: router_http` in `config/skeleton.yaml`:**
 
