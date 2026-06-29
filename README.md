@@ -193,6 +193,64 @@ The 18 tasks generated for idx-signal-system (produced by `skeleton plan --from=
 | T-017 | Job Entrypoints | `jobs/` | `jobs/run_morning.py`, `jobs/run_midday.py`, `scheduler/` |
 | T-018 | Integration Tests + Final Validation | — | integration tests, launchd plists, final docs |
 
+<details>
+<summary><strong>Complete development checklist (idx-signal-system)</strong> — copy this into your project and tick off as you go</summary>
+
+#### Phase 1 — Infrastructure
+
+- [x] Install 9router: `npm install -g 9router` (github.com/decolua/9router)
+- [x] Start daemon: `skeleton router start` → `http://localhost:20128/dashboard`
+- [x] Dashboard → **Providers** → Add → Claude (Code OAuth) → Authorize → Save
+- [x] Dashboard → **Combos** → Create `skeleton-combo` → add Claude provider → Save
+- [x] Dashboard → **Endpoint & Key** → copy generated API key for `router/inject-env.sh`
+- [x] `skeleton auth --provider=9router` — verify daemon is up before any agent work
+
+#### Phase 2 — Project Scaffold
+
+- [x] `skeleton init python --role=backend --root=backend/ --name=idx-signals-system`
+- [x] `skeleton init python --role=mcp-server --root=mcp-server/ --name=idx-signals-mcp`
+- [x] `skeleton integrate` — creates `.ai/manifest.yaml`, `config/skeleton.yaml`, `scripts/hooks/`
+
+#### Phase 3 — Configuration
+
+- [x] `config/skeleton.yaml` — set `driver: router_http`, `provider: claude`, `model: cc/claude-sonnet-4-6`, `combo: skeleton-combo`
+- [x] `.ai/manifest.yaml` — set `defaults.provider: claude` (manifest wins over skeleton.yaml — must match)
+- [x] `router/inject-env.sh` — `ANTHROPIC_BASE_URL=http://localhost:20128/v1` + 9router-generated `ANTHROPIC_API_KEY` (chmod 600, add to `.gitignore`)
+
+#### Phase 4 — Planning & Validation
+
+- [x] `skeleton plan --from=docs/PLAN.md` — auto-sourced router env, enriches plan with T-001…T-018 IDs, Depends, Files, Acceptance checkboxes
+- [x] `skeleton sync` — syncs skills/agents/prompts into `.ai/`, runs `ars compose --target claude` → `CLAUDE.md`
+- [x] `skeleton doctor` — verifies config, provider harness, task count, hooks; spawns deep health check agent
+- [ ] `skeleton run --dry-run` — preview full execution plan without touching code
+
+#### Phase 5 — Execution (in dependency order)
+
+- [ ] `skeleton run 1` — T-001: Project Scaffold (no deps)
+- [ ] `skeleton run 2` — T-002: Shared Runtime — config, db (needs T-001)
+- [ ] `skeleton run 3 5 7` — T-003 Market Data Contracts · T-005 Universe Ranking · T-007 Scoring Primitives _(parallel, all need T-002)_
+- [ ] `skeleton run 4` — T-004: Market Data Adapters (needs T-003)
+- [ ] `skeleton run 6 8 13` — T-006 Universe Promotion · T-008 Level Engine · T-013 News Intelligence _(parallel)_
+- [ ] `skeleton run 9` — T-009: Composite Scoring (needs T-006, T-008)
+- [ ] `skeleton run 10` — T-010: Scoring Service (needs T-003, T-004, T-006, T-009)
+- [ ] `skeleton run 11 12 14` — T-011 Backtest · T-012 Outcomes · T-014 Picks Memory _(parallel, all need T-010)_
+- [ ] `skeleton run 15` — T-015: Delivery + Telegram (needs T-012, T-014)
+- [ ] `skeleton run 16` — T-016: Calibration (needs T-011, T-012, T-015)
+- [ ] `skeleton run 17` — T-017: Job Entrypoints (needs T-010…T-016)
+- [ ] `skeleton run 18` — T-018: Integration Tests + Final Validation (needs T-017)
+
+Or let skeleton handle dependency ordering automatically:
+
+```sh
+skeleton run --full
+```
+
+#### Phase 6 — Teardown
+
+- [ ] `skeleton router stop`
+
+</details>
+
 **No a2a session yet?** Generate from an architecture doc directly:
 
 ```sh

@@ -175,9 +175,9 @@ _ensure_plan_index() {
 
     if [[ ! -f "${index_path}" ]] || \
        [[ "${plan_path}" -nt "${index_path}" ]]; then
-        log_info "[run] Refreshing plan index from ${plan_path}"
+        log_info "[run] Refreshing plan index from ${plan_path}" >&2
         python3 "${_SKELETON_ROOT}/scripts/plan/plan_parser.py" \
-            "${plan_path}" --export "${index_path}" 2>/dev/null || true
+            "${plan_path}" --export "${index_path}" >&2 2>/dev/null || true
     fi
 
     echo "${index_path}"
