@@ -88,82 +88,111 @@ skeleton integrate
 #   execution:
 #     driver: router_http
 #     cli:
-#       provider: claude    # ← must be claude (not copilot) when using 9router
+#       provider: claude              # must be claude (not copilot)
+#       model: cc/claude-sonnet-4-6   # cc/ prefix → 9router routes via Claude Code OAuth
 #   router:
-#     combo: project-default
+#     combo: skeleton-combo           # matches the combo name you created in dashboard
+
+# Also set defaults.provider in .ai/manifest.yaml:
+#   defaults:
+#     provider: claude   # ← must match config/skeleton.yaml cli.provider
 
 # Open http://localhost:20128/dashboard and do 3 things:
 #
-# 1. Sidebar → "Providers" → Add → choose Claude
-#    Enter your Anthropic API key (sk-ant-...) → Save
-#    (9router uses this key to call Claude on your behalf)
+# 1. Sidebar → "Providers" → Add → choose Claude (Code OAuth)
+#    Authorize with your GitHub/Claude account → Save
+#    (9router uses Claude Code OAuth — no raw Anthropic API key needed here)
 #
 # 2. Sidebar → "Combos" → Create combo
-#    Name: project-default → add the Claude provider you just created → Save
+#    Name: skeleton-combo → add the Claude provider you just created → Save
 #    (a combo is a named routing group — skeleton.yaml points to it by name)
 #
-# 3. The endpoint is already shown on "Endpoint & Key" page:
-#    API Endpoint: http://localhost:20128/v1  ← this is ANTHROPIC_BASE_URL
+# 3. Sidebar → "Endpoint & Key" → note the generated API key shown there
+#    API Endpoint: http://localhost:20128/v1   ← ANTHROPIC_BASE_URL
+#    API Key:      sk-<generated-by-9router>   ← ANTHROPIC_API_KEY (NOT your Anthropic key)
 #
 # Create router/inject-env.sh in your project (chmod 600, never commit):
 mkdir -p router
 cat > router/inject-env.sh << 'ENVEOF'
 export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
-export ANTHROPIC_API_KEY="sk-ant-your-actual-key-here"
+export ANTHROPIC_API_KEY="sk-your-9router-generated-key"   # from dashboard → Endpoint & Key
 ENVEOF
 chmod 600 router/inject-env.sh
+# Note: ANTHROPIC_API_KEY here is the 9router-generated key (not your Anthropic API key).
+# Your actual Anthropic API key goes inside 9router → Providers page.
+# If 9router has "Require API key" OFF, any non-empty value works.
 
-skeleton router health              # confirm token is accepted
+skeleton router health              # confirm 9router is up
 skeleton auth --provider=9router    # full pre-flight pass (should show ✓ for both)
 
 # ── Step 6: Enrich PLAN.md for skeleton execution ─────────────────────────────
-# Source inject-env.sh first so ANTHROPIC_BASE_URL is set before claude CLI runs.
-# (This redirects claude → 9router → Anthropic instead of calling Anthropic directly)
-source router/inject-env.sh
-
-# docs/PLAN.md already exists from a2a-brainstorm — enrich it with task IDs,
-# dependency chain, file ownership, and acceptance criteria checkboxes.
+# skeleton plan uses claude CLI's own OAuth directly (bypasses 9router entirely).
+# inject-env.sh is NOT sourced here — plan unsets ANTHROPIC_BASE_URL internally.
 skeleton plan --from=docs/PLAN.md
-# → reads docs/PLAN.md, spawns claude agent routed through 9router
+# → reads docs/PLAN.md, spawns claude agent (direct OAuth, no 9router)
 # → adds T-001…T-018 IDs, Depends:, Files:, Acceptance: checkboxes
-# → rewrites docs/PLAN.md in skeleton execution format
+# → rewrites docs/PLAN.md in skeleton execution format (spinner + live tail shown)
 
-# ── Step 7: Validate everything ───────────────────────────────────────────────
+# ── Step 7: Install framework skills and agents ───────────────────────────────
+skeleton sync
+# → syncs skills/agents/prompts from upstream to .ai/ (ARES canonical source)
+# → runs ars compose --target claude → generates CLAUDE.md provider harness
+# → spawns background validation agent
+
+# ── Step 8: Validate everything ───────────────────────────────────────────────
+source router/inject-env.sh   # required — doctor spawns agents that use 9router
 skeleton doctor
-# → ✓ .ai/manifest.yaml, config/skeleton.yaml, docs/PLAN.md
-# → ✓ driver: router_http → 9router health OK
-# → ✓ 8 tasks found in docs/PLAN.md
-# → ✓ scripts/hooks/quality-gates.sh
+# → ✓ .ai/manifest.yaml (provider: claude), config/skeleton.yaml, docs/PLAN.md
+# → ✓ driver: router_http, model: cc/claude-sonnet-4-6
+# → ✓ 18 tasks found in docs/PLAN.md
+# → ✓ scripts/hooks/quality-gates.sh, CLAUDE.md harness
+# → spawns deep health check agent (spinner → live tail, 1-3 min)
 
-# ── Step 8: Dry run ───────────────────────────────────────────────────────────
+# ── Step 9: Dry run ───────────────────────────────────────────────────────────
 skeleton run --dry-run    # preview full execution plan without touching code
 
-# ── Step 9: Execute ───────────────────────────────────────────────────────────
-skeleton run 1              # T-001: market_data layer
-skeleton run 2              # T-002: scoring engine (technicals)
-skeleton run 3              # T-003: backtest runner
-skeleton run --parallel 4 5 # T-004 & T-005 in parallel worktrees
-skeleton run 6              # T-006: Tier B scout + promotion
-skeleton run 7              # T-007: delivery + scheduler
-skeleton run 8              # T-008: calibration + Telegram approval
-skeleton run --full         # or run all 8 phases end-to-end
+# ── Step 10: Execute ──────────────────────────────────────────────────────────
+skeleton run 1              # T-001: project scaffold
+skeleton run 2              # T-002: shared runtime (config, db)
+skeleton run 3 4            # T-003, T-004: market data contracts + adapters
+skeleton run 5 6            # T-005, T-006: universe ranking + promotion
+skeleton run 7 8 9          # T-007–T-009: scoring primitives, levels, composite
+skeleton run 10             # T-010: scoring service
+skeleton run 11 12          # T-011, T-012: backtest engine + outcomes tracking
+skeleton run 13             # T-013: news intelligence
+skeleton run 14             # T-014: picks memory + diffing
+skeleton run 15             # T-015: delivery + Telegram integration
+skeleton run 16             # T-016: calibration module
+skeleton run 17             # T-017: job entrypoints (run_morning, run_midday)
+skeleton run 18             # T-018: integration tests + final validation
+skeleton run --full         # or run all 18 tasks end-to-end in dependency order
 
 # ── When done ─────────────────────────────────────────────────────────────────
 skeleton router stop
 ```
 
-The 8 tasks generated for idx-signal-system:
+The 18 tasks generated for idx-signal-system (produced by `skeleton plan --from=docs/PLAN.md`):
 
-| Task | Phase | Module | Key Files |
-|------|-------|--------|-----------|
-| T-001 | Data layer | `market_data` | `backend/modules/market_data/fetchers/`, `repository.py` |
-| T-002 | Scoring engine (technicals) | `scoring` | `backend/modules/scoring/technicals.py`, `support_resistance.py` |
-| T-003 | Backtest runner | `backtest` | `backend/modules/backtest/service.py`, `run_backtest_cli.py` |
-| T-004 | Flow + corp actions + sector caps | `scoring` (extend) | `backend/modules/scoring/flow.py`, `sector_cap.py` |
-| T-005 | News/LLM tagging | `news_intelligence` | `backend/modules/news_intelligence/providers/`, `service.py` |
-| T-006 | Tier B scout + promotion | `universe` | `backend/modules/universe/liquidity_ranking.py`, `service.py` |
-| T-007 | Delivery + scheduler | `delivery`, `jobs/` | `backend/modules/delivery/telegram_bot.py`, `jobs/run_morning.py`, `scheduler/` |
-| T-008 | Calibration + Telegram approval | `calibration` | `backend/modules/calibration/service.py`, `telegram_approval.py` |
+| Task | Title | Key Module | Representative Files |
+|------|-------|-----------|----------------------|
+| T-001 | Project Scaffold | — | `backend/pyproject.toml`, `backend/.env.example` |
+| T-002 | Shared Runtime | `shared` | `backend/shared/config.py`, `backend/shared/db.py` |
+| T-003 | Market Data Contracts + Persistence | `market_data` | `backend/modules/market_data/models/`, `repository.py` |
+| T-004 | Market Data Adapters | `market_data` | `fetchers/yfinance_fetcher.py`, `fetchers/idx_scraper.py` |
+| T-005 | Universe Ranking + Sector Mapping | `universe` | `liquidity_ranking.py`, `idx_universe_pool.py` |
+| T-006 | Universe Promotion + Public Service | `universe` | `repository.py`, `models/` |
+| T-007 | Scoring Primitives | `scoring` | `technicals.py`, `support_resistance.py`, `fibonacci.py` |
+| T-008 | Level Engine | `scoring` | `flow_flags.py`, `corp_action_filter.py` |
+| T-009 | Composite Scoring + Filtering | `scoring` | `scoring/__init__.py` |
+| T-010 | Scoring Service | `scoring` | `scoring/service.py` |
+| T-011 | Backtest Engine | `backtest` | `backtest/runner.py`, `backtest/models/` |
+| T-012 | Outcomes Tracking | `outcomes` | `outcomes/repository.py`, `outcomes/models/` |
+| T-013 | News Intelligence | `news_intelligence` | `providers/base.py`, `news_intelligence/models/` |
+| T-014 | Picks Memory + Diffing | `picks` | `picks/repository.py`, `picks/models/` |
+| T-015 | Delivery + Telegram Integration | `delivery` | `delivery/formatter.py`, `delivery/telegram_bot.py` |
+| T-016 | Calibration Module | `calibration` | `calibration/proposal.py`, `calibration/models/` |
+| T-017 | Job Entrypoints | `jobs/` | `jobs/run_morning.py`, `jobs/run_midday.py`, `scheduler/` |
+| T-018 | Integration Tests + Final Validation | — | integration tests, launchd plists, final docs |
 
 **No a2a session yet?** Generate from an architecture doc directly:
 
@@ -323,20 +352,32 @@ This is `ANTHROPIC_BASE_URL` — the local address skeleton uses instead of `api
 mkdir -p router
 cat > router/inject-env.sh << 'EOF'
 export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
-export ANTHROPIC_API_KEY="sk-ant-your-actual-key-here"
+export ANTHROPIC_API_KEY="sk-your-9router-generated-key"   # from dashboard → Endpoint & Key
 EOF
 chmod 600 router/inject-env.sh
 ```
 
-> **Why does `ANTHROPIC_API_KEY` still need a real key?** The Claude CLI (or any OpenAI-compatible client) must send *some* value in the `Authorization` header. Since "Require API key" is off in 9router, it ignores this value — but the header must still be present. Set it to your actual Anthropic key; 9router will use the key you configured under Providers.
+> **What is `ANTHROPIC_API_KEY` here?** It is the key 9router generated for its own local endpoint — visible on the **Endpoint & Key** page of the dashboard. It is NOT your Anthropic API key. Your actual Anthropic API key (or Claude Code OAuth) lives in 9router's **Providers** page. With "Require API key" off in 9router, any non-empty value works; using the 9router-generated key is the recommended approach.
+
+> **Note on `skeleton plan`:** The `skeleton plan` command bypasses 9router entirely — it unsets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` internally so the claude CLI uses its own OAuth directly. You do not need to `source inject-env.sh` before `skeleton plan`. All other commands (`skeleton doctor`, `skeleton run`) do route through 9router and require the env vars.
 
 **Set `driver: router_http` in `config/skeleton.yaml`:**
 
 ```yaml
 execution:
   driver: router_http
+  cli:
+    provider: claude              # must be claude (not copilot)
+    model: cc/claude-sonnet-4-6   # cc/ prefix → 9router routes via Claude Code OAuth
 router:
-  combo: project-default   # matches the combo name from Step B above
+  combo: skeleton-combo   # matches the combo name from Step B above
+```
+
+Also update `.ai/manifest.yaml` — this file's `defaults.provider` overrides `config/skeleton.yaml`:
+
+```yaml
+defaults:
+  provider: claude   # must match cli.provider above — defaults to copilot if omitted
 ```
 
 **Verify everything works:**
@@ -344,11 +385,18 @@ router:
 ```sh
 skeleton router health              # HTTP 200 from localhost:20128/api/health
 skeleton auth --provider=9router    # ✓ Running, ✓ inject-env.sh found
-source router/inject-env.sh         # load env vars into your shell before running agents
+
+skeleton sync                       # install framework skills/agents into .ai/ + compose CLAUDE.md
+
+source router/inject-env.sh         # load env vars before running agents (doctor, run)
+skeleton doctor                     # full health check — spawns claude agent via 9router
+                                    # (spinner while thinking → live tail once output starts)
 skeleton router stop                # stop daemon when done
 ```
 
-Skip this step entirely if using `driver: cli_subscription` (claude/copilot/codex CLI direct — no daemon needed).
+> **`skeleton plan` does not need `source router/inject-env.sh`** — it bypasses 9router and calls the claude CLI directly via its own OAuth. All other agent-spawning commands (`skeleton doctor`, `skeleton run`) route through 9router and must have the env vars set.
+
+Skip the 9router setup entirely if using `driver: cli_subscription` (claude/copilot/codex CLI direct — no daemon needed).
 
 **6. Onboard an existing repo** · `skeleton integrate`
 
