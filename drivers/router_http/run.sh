@@ -560,8 +560,64 @@ def execute_tool(name, args):
     else:
         return f"ERROR: unknown tool {name!r}"
 
+# ── Dry-run mock ─────────────────────────────────────────────────────────────
+# SKELETON_DRY_RUN=1 returns a fake tool-call response without hitting any
+# real API. Use this for local testing to avoid burning quota.
+# The mock: first call → write_file for each path in PLAN.md "Files to create"
+#           second call → stop (simulate task done)
+_dry_run_call = 0
+
+def _dry_run_response():
+    global _dry_run_call
+    _dry_run_call += 1
+    # First call: emit a write_file tool call for a canary file
+    if _dry_run_call == 1:
+        mock = {
+            "id": "dry-run-1",
+            "object": "chat.completion",
+            "model": "dry-run",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call_dry1",
+                        "type": "function",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": json.dumps({
+                                "path": f"{stage}/__dry_run_test__.py",
+                                "content": f"# dry-run placeholder for stage={stage}\n"
+                            })
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 1, "total_tokens": 1}
+        }
+    else:
+        # Second call: done
+        mock = {
+            "id": "dry-run-2",
+            "object": "chat.completion",
+            "model": "dry-run",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "[DRY RUN] No real API call made."},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 1, "total_tokens": 1}
+        }
+    return 200, json.dumps(mock)
+
+DRY_RUN = os.environ.get("SKELETON_DRY_RUN", "").strip() in ("1", "true", "yes")
+
 # ── HTTP helper ───────────────────────────────────────────────────────────────
 def chat_request(messages):
+    if DRY_RUN:
+        return _dry_run_response()
     body = {
         "model":      model,
         "messages":   messages,
@@ -825,6 +881,14 @@ run_driver() {
     fi
 
     # ── Assessment stage: one-shot streaming (original behaviour) ─────────────
+    # Dry-run short-circuit: write a placeholder log and return immediately.
+    if [[ "${SKELETON_DRY_RUN:-}" =~ ^(1|true|yes)$ ]]; then
+        mkdir -p "$(dirname "${log_file}")"
+        echo "[DRY RUN] Assessment stage skipped — no real API call made." > "${log_file}"
+        log_ok "[${stage}] dry-run — skipped (SKELETON_DRY_RUN=1)"
+        return 0
+    fi
+
     local body_tmp
     body_tmp="$(mktemp)"
 
