@@ -467,6 +467,19 @@ main() {
     # ── Load config ─────────────────────────────────────────────────────────
     load_config "${PROJECT_ROOT}" 2>/dev/null || true
 
+    # ── Auto-inject 9router env vars if driver=router_http ───────────────────
+    if [[ -z "${ANTHROPIC_BASE_URL:-}" ]] && \
+       [[ "${SKELETON_DRIVER:-}" == "router_http" ]]; then
+        local _inject="${PROJECT_ROOT}/router/inject-env.sh"
+        if [[ -f "${_inject}" ]]; then
+            # shellcheck source=/dev/null
+            source "${_inject}"
+            log_info "[run] Auto-sourced router/inject-env.sh (driver=router_http)"
+        else
+            log_warn "[run] driver=router_http but router/inject-env.sh not found"
+        fi
+    fi
+
     # ── Resolve plan path ────────────────────────────────────────────────────
     if [[ -z "${_plan_path}" ]]; then
         _plan_path="${SKELETON_PLAN:-docs/PLAN.md}"

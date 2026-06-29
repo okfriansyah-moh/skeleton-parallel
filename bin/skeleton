@@ -141,6 +141,30 @@ _ensure_skeleton_model() {
     fi
 }
 
+# Auto-source router/inject-env.sh when driver=router_http and ANTHROPIC_BASE_URL is not set.
+# No-op if the env var is already set, driver is not router_http, or the file is missing.
+# Call this at the top of any cmd_* that spawns agents (plan, doctor, run).
+_auto_inject_router_env() {
+    local _dir="${1:-.}"
+    [[ -n "${ANTHROPIC_BASE_URL:-}" ]] && return 0   # already set — nothing to do
+    local _driver
+    _driver="$(grep -E '^\s*driver\s*:' "${_dir}/config/skeleton.yaml" 2>/dev/null \
+        | head -1 | sed 's/.*://;s/#.*//;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
+    [[ "${_driver}" != "router_http" ]] && return 0   # not router_http — skip
+    local _inject="${_dir}/router/inject-env.sh"
+    if [[ -f "${_inject}" ]]; then
+        # shellcheck source=/dev/null
+        source "${_inject}"
+        log_info "Auto-sourced router/inject-env.sh (driver=router_http)"
+    else
+        log_warn "driver=router_http but router/inject-env.sh not found — agents may fail"
+        log_info "  Create it: mkdir -p router && cat > router/inject-env.sh << 'EOF'"
+        log_info "  export ANTHROPIC_BASE_URL=\"http://localhost:20128/v1\""
+        log_info "  export ANTHROPIC_API_KEY=\"sk-your-9router-key\""
+        log_info "  EOF && chmod 600 router/inject-env.sh"
+    fi
+}
+
 # Detect the configured AI provider for a given project directory.
 # Reads config/skeleton.yaml; defaults to "copilot" for backward compatibility.
 _detect_provider_for_dir() {
@@ -2075,6 +2099,7 @@ cmd_doctor() {
     done
 
     target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+    _auto_inject_router_env "${target_dir}"
     _ensure_skeleton_model "${target_dir}"
 
     echo ""
@@ -3228,6 +3253,7 @@ cmd_plan() {
     done
 
     target_dir="$(cd "${target_dir}" && pwd)"
+    _auto_inject_router_env "${target_dir}"
     _ensure_skeleton_model "${target_dir}"
     local output_path="${target_dir}/${output_doc}"
 

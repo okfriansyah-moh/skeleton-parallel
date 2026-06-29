@@ -126,10 +126,9 @@ skeleton router health              # confirm 9router is up
 skeleton auth --provider=9router    # full pre-flight pass (should show ✓ for both)
 
 # ── Step 6: Enrich PLAN.md for skeleton execution ─────────────────────────────
-# Source inject-env.sh first — skeleton plan routes through 9router like all other commands.
-source router/inject-env.sh
+# No need to source inject-env.sh — skeleton auto-sources it when driver=router_http.
 skeleton plan --from=docs/PLAN.md
-# → reads docs/PLAN.md, spawns claude agent routed through 9router (cc/claude-sonnet-4-6)
+# → auto-sources router/inject-env.sh → routes through 9router (cc/claude-sonnet-4-6)
 # → adds T-001…T-018 IDs, Depends:, Files:, Acceptance: checkboxes
 # → rewrites docs/PLAN.md in skeleton execution format (spinner + live tail shown)
 
@@ -140,8 +139,8 @@ skeleton sync
 # → spawns background validation agent
 
 # ── Step 8: Validate everything ───────────────────────────────────────────────
-source router/inject-env.sh   # required — doctor spawns agents that use 9router
 skeleton doctor
+# → auto-sources router/inject-env.sh (driver=router_http)
 # → ✓ .ai/manifest.yaml (provider: claude), config/skeleton.yaml, docs/PLAN.md
 # → ✓ driver: router_http, model: cc/claude-sonnet-4-6
 # → ✓ 18 tasks found in docs/PLAN.md
@@ -359,7 +358,7 @@ chmod 600 router/inject-env.sh
 
 > **What is `ANTHROPIC_API_KEY` here?** It is the key 9router generated for its own local endpoint — visible on the **Endpoint & Key** page of the dashboard. It is NOT your Anthropic API key. Your actual Anthropic API key (or Claude Code OAuth) lives in 9router's **Providers** page. With "Require API key" off in 9router, any non-empty value works; using the 9router-generated key is the recommended approach.
 
-> **All agent-spawning commands route through 9router.** `source router/inject-env.sh` before `skeleton plan`, `skeleton doctor`, and `skeleton run`. The env vars set `ANTHROPIC_BASE_URL=http://localhost:20128/v1` so every claude CLI call is proxied through 9router using your configured combo and Claude Code OAuth.
+> **`source router/inject-env.sh` is not required manually.** When `driver: router_http` is configured, skeleton auto-sources `router/inject-env.sh` at the start of `skeleton plan`, `skeleton doctor`, and `skeleton run`. The env vars are injected automatically.
 
 **Set `driver: router_http` in `config/skeleton.yaml`:**
 
@@ -387,14 +386,10 @@ skeleton router health              # HTTP 200 from localhost:20128/api/health
 skeleton auth --provider=9router    # ✓ Running, ✓ inject-env.sh found
 
 skeleton sync                       # install framework skills/agents into .ai/ + compose CLAUDE.md
-
-source router/inject-env.sh         # load env vars before running agents (doctor, run)
-skeleton doctor                     # full health check — spawns claude agent via 9router
+skeleton doctor                     # auto-sources inject-env.sh → full health check via 9router
                                     # (spinner while thinking → live tail once output starts)
 skeleton router stop                # stop daemon when done
 ```
-
-> **`skeleton plan` does not need `source router/inject-env.sh`** — it bypasses 9router and calls the claude CLI directly via its own OAuth. All other agent-spawning commands (`skeleton doctor`, `skeleton run`) route through 9router and must have the env vars set.
 
 Skip the 9router setup entirely if using `driver: cli_subscription` (claude/copilot/codex CLI direct — no daemon needed).
 
