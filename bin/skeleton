@@ -185,7 +185,6 @@ _spawn_agent() {
                     -p "${full_prompt}" \
                     --model="${AGENT_MODEL}" \
                     --allowedTools all \
-                    --non-interactive \
                     2>&1 | tee "${log_file}"
             )
             exit_code=${PIPESTATUS[0]:-$?}
@@ -263,7 +262,6 @@ _spawn_agent_bg() {
                     -p "${full_prompt}" \
                     --model="${AGENT_MODEL}" \
                     --allowedTools all \
-                    --non-interactive \
                     &>"${log_file}"
             ) &
             ;;
@@ -3389,8 +3387,7 @@ _plan_spawn_agent() {
               claude -p "${_prompt}" \
                   --model="${AGENT_MODEL}" \
                   --allowedTools none \
-                  --non-interactive \
-                  2>/dev/null
+                  2>&1
             ) > "${_agent_out}" || true
             ;;
         copilot)
