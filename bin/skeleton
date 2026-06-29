@@ -158,7 +158,8 @@ _spawn_agent() {
     mkdir -p "${log_dir}"
     local log_file="${log_dir}/${log_label}-$(date +%Y%m%d-%H%M%S).log"
 
-    log_step "Spawning agent: ${BOLD}${agent_name}${NC} (provider: ${provider}, model: ${AGENT_MODEL})"
+    local _active_model="${SKELETON_MODEL:-${AGENT_MODEL}}"
+    log_step "Spawning agent: ${BOLD}${agent_name}${NC} (provider: ${provider}, model: ${_active_model})"
 
     local exit_code=0
     case "${provider}" in
@@ -169,7 +170,7 @@ _spawn_agent() {
                 copilot \
                     -p "${full_prompt}" \
                     --agent="${agent_name}" \
-                    --model="${AGENT_MODEL}" \
+                    --model="${_active_model}" \
                     --no-ask-user \
                     --allow-all-tools \
                     --autopilot \
@@ -183,7 +184,7 @@ _spawn_agent() {
                 cd "${work_dir}"
                 claude \
                     -p "${full_prompt}" \
-                    --model="${AGENT_MODEL}" \
+                    --model="${_active_model}" \
                     --allowedTools all \
                     2>&1 | tee "${log_file}"
             )
@@ -239,7 +240,8 @@ _spawn_agent_bg() {
     mkdir -p "${log_dir}"
     local log_file="${log_dir}/${log_label}-$(date +%Y%m%d-%H%M%S).log"
 
-    log_info "Spawning background agent: ${agent_name} (provider: ${provider}, log: ${log_file})"
+    local _active_model="${SKELETON_MODEL:-${AGENT_MODEL}}"
+    log_info "Spawning background agent: ${agent_name} (provider: ${provider}, model: ${_active_model}, log: ${log_file})"
 
     case "${provider}" in
         copilot)
@@ -248,7 +250,7 @@ _spawn_agent_bg() {
                 copilot \
                     -p "${full_prompt}" \
                     --agent="${agent_name}" \
-                    --model="${AGENT_MODEL}" \
+                    --model="${_active_model}" \
                     --no-ask-user \
                     --allow-all-tools \
                     --autopilot \
@@ -260,7 +262,7 @@ _spawn_agent_bg() {
                 cd "${work_dir}"
                 claude \
                     -p "${full_prompt}" \
-                    --model="${AGENT_MODEL}" \
+                    --model="${_active_model}" \
                     --allowedTools all \
                     &>"${log_file}"
             ) &
@@ -2133,9 +2135,13 @@ cmd_doctor() {
             source '${SKELETON_ROOT}/scripts/lib/config.sh' 2>/dev/null
             load_config '${target_dir}' 2>/dev/null
             echo \"driver=\${SKELETON_DRIVER:-cli_subscription}\"
-            echo \"provider=\${SKELETON_PROVIDER:-}\"" 2>/dev/null || true)"
+            echo \"provider=\${SKELETON_PROVIDER:-}\"
+            echo \"model=\${SKELETON_MODEL:-}\"" 2>/dev/null || true)"
         _drv="$(echo "${_cfg_out}"      | grep '^driver='   | cut -d= -f2)"
         _provider="$(echo "${_cfg_out}" | grep '^provider=' | cut -d= -f2)"
+        local _cfg_model
+        _cfg_model="$(echo "${_cfg_out}" | grep '^model=' | cut -d= -f2)"
+        [[ -n "${_cfg_model}" ]] && SKELETON_MODEL="${_cfg_model}" && export SKELETON_MODEL
     fi
     _drv="${_drv:-cli_subscription}"
     # Infer provider from config/skeleton.yaml if not set via SKELETON_PROVIDER
@@ -2145,7 +2151,7 @@ cmd_doctor() {
     fi
     _provider="${_provider:-copilot}"
 
-    log_info "driver=${_drv}  provider=${_provider}"
+    log_info "driver=${_drv}  provider=${_provider}  model=${SKELETON_MODEL:-${AGENT_MODEL}}"
 
     case "${_provider}" in
         copilot)
@@ -2336,15 +2342,15 @@ cmd_doctor() {
     fi
     echo ""
 
-    # ── Deep agent health check (Copilot only) ────────────────────────────
-    if [[ "${_provider}" == "copilot" ]]; then
+    # ── Deep agent health check (all CLI providers) ───────────────────────
+    if [[ "${_provider}" =~ ^(copilot|claude|codex)$ ]]; then
         if [[ ${issues} -gt 0 ]] || [[ ${warnings} -gt 0 ]]; then
-            log_step "Spawning Copilot agent for deep health check and auto-fix..."
-            _spawn_copilot_agent "${target_dir}" "doctor" \
+            log_step "Spawning agent for deep health check and auto-fix (provider: ${_provider})..."
+            _spawn_agent "${target_dir}" "doctor" \
                 "Run a deep health check on this project. Found ${issues} issues and ${warnings} warnings. Validate and fix: 1) All module boundaries (no cross-module imports). 2) DTO contracts are immutable and properly defined in contracts/. 3) Database adapter is the sole DB access point (no raw SQL in modules). 4) All config is YAML-driven (no hardcoded values in code). 5) Tests are deterministic and network-free. 6) All missing skills, agents, or prompts should be installed. 7) Missing docs templates should be created from skeleton-parallel defaults. Fix all issues found. After fixing, commit with message 'chore: doctor auto-fix'." \
                 "doctor-deep-check"
         else
-            _spawn_copilot_agent_bg "${target_dir}" "doctor" \
+            _spawn_agent_bg "${target_dir}" "doctor" \
                 "All basic checks passed. Run a deep validation: 1) Verify module boundaries. 2) Check DTO immutability. 3) Validate database adapter isolation. 4) Check for hardcoded config values. 5) Ensure parallel dev readiness. Report findings in .parallel-dev/agent-logs/." \
                 "doctor-bg-validation"
         fi

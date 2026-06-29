@@ -174,7 +174,7 @@ load_config() {
             SKELETON_MODEL="${_cursor_model:-composer-2.5}"
             ;;
         *)
-            SKELETON_MODEL="${_cli_model:-claude-sonnet-4.6}"
+            SKELETON_MODEL="${_cli_model:-claude-sonnet-4-6}"
             ;;
     esac
 
