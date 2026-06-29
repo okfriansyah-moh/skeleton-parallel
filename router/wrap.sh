@@ -162,11 +162,11 @@ router_start() {
     local pid_file
     pid_file="$(_router_pid_file)"
 
-    # Check if already running
-    if _router_pid_alive; then
+    # Check if already running via health endpoint (port lookup, not stale PID file)
+    if _router_http_healthy; then
         local existing_pid
-        existing_pid="$(cat "${pid_file}" 2>/dev/null || echo "?")"
-        log_warn "[router] 9router already running (PID: ${existing_pid})"
+        existing_pid="$(_find_router_pid_by_port)"
+        log_warn "[router] 9router already running (PID: ${existing_pid:-unknown}, port: ${_ROUTER_PORT})"
         return 0
     fi
 
@@ -183,33 +183,36 @@ router_start() {
 
     log_step "[router] Starting 9router on port ${_ROUTER_PORT}..."
 
+    # --tray: headless background mode — skips interactive TUI (which needs a TTY),
+    #         removes SIGHUP listener so terminal close does not kill the daemon.
+    # --host 127.0.0.1: bind locally only (suppresses network-exposure warning).
+    # cli.js stays alive in tray mode so $! gives the correct PID.
     if command -v 9router &>/dev/null; then
-        # -p  port   -n  no-browser (headless daemon mode)
-        9router -p "${_ROUTER_PORT}" -n > "${log_file}" 2>&1 &
+        9router -p "${_ROUTER_PORT}" --tray --host 127.0.0.1 > "${log_file}" 2>&1 &
     else
-        npx 9router -p "${_ROUTER_PORT}" -n > "${log_file}" 2>&1 &
+        npx 9router -p "${_ROUTER_PORT}" --tray --host 127.0.0.1 > "${log_file}" 2>&1 &
     fi
 
-    local pid=$!
-    echo "${pid}" > "${pid_file}"
-
-    # Wait up to 5 seconds for health check to pass
+    # Wait up to 15 seconds for health check to pass
     local attempts=0
-    while (( attempts < 10 )); do
+    while (( attempts < 30 )); do
         sleep 0.5
         if _router_http_healthy; then
-            log_ok "[router] 9router started (PID: ${pid}, port: ${_ROUTER_PORT})"
+            # cli.js may have exited after spawning the server — find real PID by port
+            local real_pid
+            real_pid="$(_find_router_pid_by_port)"
+            [[ -n "${real_pid}" ]] && echo "${real_pid}" > "${pid_file}"
+            log_ok "[router] 9router started (PID: ${real_pid:-unknown}, port: ${_ROUTER_PORT})"
             log_info "[router] Dashboard: ${_ROUTER_DASHBOARD_URL}"
             log_info "[router] Logs:      ${log_file}"
             return 0
         fi
-        (( attempts++ ))
+        (( ++attempts ))
     done
 
-    log_warn "[router] 9router process launched (PID: ${pid}) but health check not responding yet"
-    log_info "[router] Check logs: cat ${log_file}"
-    log_info "[router] Check: skeleton router health"
-    return 0
+    log_error "[router] 9router did not respond after 15s. Check logs:"
+    log_info "  cat ${log_file}"
+    return 1
 }
 
 # ── _find_router_pid_by_port ──────────────────────────────────────────────────
@@ -261,7 +264,7 @@ router_stop() {
         if ! kill -0 "${pid}" 2>/dev/null; then
             break
         fi
-        (( attempts++ ))
+        (( ++attempts ))
     done
 
     # Force kill if still running
@@ -296,20 +299,16 @@ router_status() {
         echo -e "  Installed:  ${RED}no${NC} — run: skeleton router install"
     fi
 
-    # Running?
-    if _router_pid_alive; then
-        local pid
-        pid="$(cat "${pid_file}" 2>/dev/null || echo "?")"
-        echo -e "  Running:    ${GREEN}yes${NC} (PID: ${pid})"
+    # Running? — use HTTP health as the source of truth (PID file can be stale
+    # because cli.js spawns the server as a child and may exit itself)
+    if _router_http_healthy; then
+        local port_pid
+        port_pid="$(_find_router_pid_by_port)"
+        echo -e "  Running:    ${GREEN}yes${NC} (PID: ${port_pid:-unknown})"
+        echo -e "  Health:     ${GREEN}OK${NC} (${_ROUTER_HEALTH_URL})"
     else
         echo -e "  Running:    ${RED}no${NC}"
         [[ "${installed}" == "true" ]] && echo -e "             → run: skeleton router start"
-    fi
-
-    # Health?
-    if _router_http_healthy; then
-        echo -e "  Health:     ${GREEN}OK${NC} (${_ROUTER_HEALTH_URL})"
-    else
         echo -e "  Health:     ${YELLOW}unreachable${NC} (${_ROUTER_HEALTH_URL})"
     fi
 
