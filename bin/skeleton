@@ -3381,6 +3381,18 @@ _plan_spawn_agent() {
 
     log_step "Spawning plan-management agent (provider: ${_provider}, model: ${AGENT_MODEL})..."
 
+    # Spinner shown while agent runs (output captured to temp file, not streamed)
+    _plan_spinner() {
+        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        local i=0
+        while kill -0 "$1" 2>/dev/null; do
+            printf '\r  %s  Working...' "${frames[$((i % 10))]}"
+            (( i++ )) || true
+            sleep 0.12
+        done
+        printf '\r\033[K'  # clear spinner line
+    }
+
     case "${_provider}" in
         claude)
             ( cd "${_work_dir}"
@@ -3390,7 +3402,9 @@ _plan_spawn_agent() {
                   --model="${AGENT_MODEL}" \
                   --allowedTools none \
                   2>&1
-            ) > "${_agent_out}" || true
+            ) > "${_agent_out}" || true &
+            _plan_spinner $!
+            wait $! || true
             ;;
         copilot)
             ( cd "${_work_dir}"
