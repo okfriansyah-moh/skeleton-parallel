@@ -7,10 +7,12 @@
 # Assembles a system prompt from 4 components per §8.2:
 #   1. SKELETON_ROOT/framework/ instructions (*.md files)
 #   2. Framework skills CSV (all 28)
-#   3. Project .ai/skills/ content (domain/custom skills)
+#   3. Project .ai/skills/ SKILL.md name+description only (trimmed)
 #   4. TASK_PROMPT.md content + stage template variable substitution
 #
 # Then calls 9router's OpenAI-compatible /v1/chat/completions via curl.
+# Implementation stages use tool calling (agentic loop); assessment stages
+# use streaming (existing behaviour).
 #
 # Usage:
 #   bash drivers/router_http/run.sh [--print-prompt] \
@@ -42,15 +44,25 @@ source "${_SKELETON_ROOT}/scripts/lib/config.sh"
 _ROUTER_DEFAULT_ENDPOINT="http://localhost:20128/v1/chat/completions"
 _ROUTER_TIMEOUT="${NINE_ROUTER_TIMEOUT:-300}"
 
+# ── _stage_uses_tools ─────────────────────────────────────────────────────────
+# Returns 0 (true) if the stage should use tool calling + non-streaming mode.
+# Assessment stages keep the existing streaming behaviour (returns 1).
+_stage_uses_tools() {
+    local stage="$1"
+    case "${stage}" in
+        post-merge-review|docs-sync|test-sufficiency|acceptance-llm|security-auditor)
+            return 1 ;;
+        *)
+            return 0 ;;
+    esac
+}
+
 # ── _assemble_system_prompt ───────────────────────────────────────────────────
 # Build the 4-component system prompt per §8.2.
 # Writes result to stdout.
 #
-# Components:
-#   1. framework/*.md instructions
-#   2. Framework skills CSV
-#   3. Project .ai/skills/ SKILL.md files
-#   4. Stage context + workspace constraint
+# Component 3 change: only emit name + description frontmatter from each
+# SKILL.md, not the full content — keeps the prompt well under token limits.
 #
 # Usage: system_prompt=$(_assemble_system_prompt <stage> <work_dir> [extra_skills])
 _assemble_system_prompt() {
@@ -77,17 +89,25 @@ _assemble_system_prompt() {
     skills_csv="$(build_skills_csv "${extra_skills}")"
     parts+=("## Skills"$'\n'"MANDATORY: Use the following skills as primary knowledge sources:"$'\n'"${skills_csv}")
 
-    # ── Component 3: Project .ai/skills/ content ──────────────────────────────
+    # ── Component 3: Project .ai/skills/ — name + description only ───────────
+    # We intentionally omit full SKILL.md bodies to avoid 191KB+ context bloat.
+    # The model only needs the skill name and a one-line description to act on them.
     local ai_skills_dir="${work_dir}/.ai/skills"
     if [[ -d "${ai_skills_dir}" ]]; then
-        local skill_content=""
+        local skill_summary=""
         while IFS= read -r -d '' skill_file; do
-            local content
-            content="$(cat "${skill_file}" 2>/dev/null || true)"
-            [[ -n "${content}" ]] && skill_content+="${content}"$'\n---\n'
+            # Extract name: and description: from YAML frontmatter (first 20 lines)
+            local name="" desc=""
+            name="$(head -20 "${skill_file}" 2>/dev/null | grep -m1 '^name:' | sed 's/^name:[[:space:]]*//' | tr -d '"'"'" || true)"
+            desc="$(head -20 "${skill_file}" 2>/dev/null | grep -m1 '^description:' | sed 's/^description:[[:space:]]*//' | tr -d '"'"'" || true)"
+            if [[ -n "${name}" ]]; then
+                skill_summary+="- ${name}"
+                [[ -n "${desc}" ]] && skill_summary+=": ${desc}"
+                skill_summary+=$'\n'
+            fi
         done < <(find "${ai_skills_dir}" -name "SKILL.md" -print0 2>/dev/null | sort -z)
-        if [[ -n "${skill_content}" ]]; then
-            parts+=("## Project Skills"$'\n'"${skill_content}")
+        if [[ -n "${skill_summary}" ]]; then
+            parts+=("## Project Skills"$'\n'"${skill_summary}")
         fi
     fi
 
@@ -111,6 +131,7 @@ _assemble_system_prompt() {
 #   # path/to/file.py                ← first comment line inside block
 #
 # Skips assessment/review stages where file writes are not expected.
+# Also skips when tool calling was used (files already written during loop).
 #
 # Usage: _apply_file_changes <log_file> <work_dir> <stage>
 _apply_file_changes() {
@@ -206,6 +227,345 @@ if written:
 PYEOF
 }
 
+# ── _run_agentic_loop ─────────────────────────────────────────────────────────
+# Run an OpenAI-compatible agentic tool-calling loop in Python.
+# Handles write_file / read_file / list_directory / run_bash tools locally.
+# Writes all output (text + tool summaries) to log_file.
+#
+# Usage: _run_agentic_loop <endpoint> <token> <model> \
+#                          <sys_tmp> <usr_tmp> <work_dir> <stage> <log_file>
+# Exit codes: 0=ok  1=error  2=rate-limited
+_run_agentic_loop() {
+    local endpoint="$1"
+    local token="$2"
+    local model="$3"
+    local sys_tmp="$4"
+    local usr_tmp="$5"
+    local work_dir="$6"
+    local stage="$7"
+    local log_file="$8"
+
+    python3 - \
+        "${endpoint}" "${token}" "${model}" \
+        "${sys_tmp}" "${usr_tmp}" \
+        "${work_dir}" "${stage}" "${log_file}" \
+        "${_ROUTER_TIMEOUT}" <<'PYEOF'
+import sys, json, os, pathlib, subprocess, urllib.request, urllib.error
+
+endpoint  = sys.argv[1]
+token     = sys.argv[2]
+model     = sys.argv[3]
+sys_file  = sys.argv[4]
+usr_file  = sys.argv[5]
+work_dir  = sys.argv[6]
+stage     = sys.argv[7]
+log_file  = sys.argv[8]
+timeout   = int(sys.argv[9])
+
+# ── Read prompt content ───────────────────────────────────────────────────────
+with open(sys_file, encoding="utf-8") as f:
+    system_content = f.read()
+with open(usr_file, encoding="utf-8") as f:
+    user_content = f.read()
+
+os.unlink(sys_file)
+os.unlink(usr_file)
+
+# ── Tool definitions ──────────────────────────────────────────────────────────
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write content to a file in the project. Creates parent directories as needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path":    {"type": "string", "description": "Relative path from project root"},
+                    "content": {"type": "string", "description": "File content to write"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a file from the project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative path from project root"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_directory",
+            "description": "List files in a directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative path from project root (default: .)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_bash",
+            "description": "Run a bash command in the project directory. Use for git commit, running tests, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Bash command to run"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (default: 60)"},
+                },
+                "required": ["command"],
+            },
+        },
+    },
+]
+
+# ── Security helpers ──────────────────────────────────────────────────────────
+ALLOWED_EXTS = {
+    ".py", ".toml", ".cfg", ".ini", ".yaml", ".yml",
+    ".sh", ".txt", ".md", ".json", ".env.example",
+    ".gitignore", ".dockerignore",
+}
+PROTECTED_FILES = {"docs/PLAN.md", "config/skeleton.yaml", ".ai/manifest.yaml"}
+
+def _safe_path(rel_path, work_dir, check_write=False):
+    """Return resolved absolute path inside work_dir or raise ValueError."""
+    if not rel_path or rel_path.startswith("/") or ".." in rel_path:
+        raise ValueError(f"Unsafe path: {rel_path!r}")
+    resolved = (pathlib.Path(work_dir) / rel_path).resolve()
+    work_resolved = pathlib.Path(work_dir).resolve()
+    if not str(resolved).startswith(str(work_resolved)):
+        raise ValueError(f"Path escapes work_dir: {rel_path!r}")
+    if check_write:
+        suffix = pathlib.Path(rel_path).suffix
+        # Files without extension (Makefile, Dockerfile, etc.) are allowed
+        if suffix and suffix not in ALLOWED_EXTS:
+            raise ValueError(f"Extension not allowed for write: {suffix!r}")
+        if rel_path in PROTECTED_FILES:
+            raise ValueError(f"Protected file, write not allowed: {rel_path!r}")
+    return resolved
+
+# ── Tool executor ─────────────────────────────────────────────────────────────
+def execute_tool(name, args):
+    if name == "write_file":
+        rel  = args.get("path", "")
+        body = args.get("content", "")
+        # Special case: allow appending task completion markers to PLAN.md only
+        if rel == "docs/PLAN.md":
+            marker_only = body.strip().startswith("<!--") and "completed" in body and body.strip().endswith("-->")
+            if marker_only:
+                try:
+                    dest = (pathlib.Path(work_dir) / rel).resolve()
+                    with open(dest, "a", encoding="utf-8") as f:
+                        f.write("\n" + body.strip() + "\n")
+                    return f"OK: appended completion marker to docs/PLAN.md"
+                except Exception as e:
+                    return f"ERROR: {e}"
+            return "ERROR: docs/PLAN.md is protected — only completion markers may be appended"
+        try:
+            dest = _safe_path(rel, work_dir, check_write=True)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(body, encoding="utf-8")
+            return f"OK: wrote {len(body)} bytes to {rel}"
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    elif name == "read_file":
+        rel = args.get("path", "")
+        try:
+            src = _safe_path(rel, work_dir)
+            return src.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    elif name == "list_directory":
+        rel = args.get("path", ".") or "."
+        try:
+            d = _safe_path(rel, work_dir)
+            if not d.is_dir():
+                return f"ERROR: not a directory: {rel}"
+            entries = sorted(str(p.relative_to(pathlib.Path(work_dir).resolve()))
+                             for p in d.iterdir())
+            return "\n".join(entries) if entries else "(empty)"
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    elif name == "run_bash":
+        cmd     = args.get("command", "")
+        t_out   = int(args.get("timeout", 60))
+        try:
+            result = subprocess.run(
+                cmd, shell=True, cwd=work_dir,
+                capture_output=True, text=True, timeout=t_out,
+            )
+            out = (result.stdout or "") + (result.stderr or "")
+            return f"exit={result.returncode}\n{out}"
+        except subprocess.TimeoutExpired:
+            return f"ERROR: command timed out after {t_out}s"
+        except Exception as e:
+            return f"ERROR: {e}"
+
+    else:
+        return f"ERROR: unknown tool {name!r}"
+
+# ── HTTP helper ───────────────────────────────────────────────────────────────
+def chat_request(messages):
+    body = {
+        "model":      model,
+        "messages":   messages,
+        "tools":      TOOLS,
+        "stream":     False,
+        "max_tokens": 16384,
+    }
+    data = json.dumps(body, ensure_ascii=False).encode()
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = resp.status
+            raw    = resp.read().decode("utf-8", errors="replace")
+            return status, raw
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        return e.code, raw
+    except Exception as e:
+        return 0, str(e)
+
+# ── Agentic loop ──────────────────────────────────────────────────────────────
+messages = [
+    {"role": "system", "content": system_content},
+    {"role": "user",   "content": user_content},
+]
+
+MAX_ITER  = 20
+log_lines = []
+
+def emit(line):
+    log_lines.append(line)
+    print(line, flush=True)
+
+rate_limited = False
+error_exit   = False
+
+for iteration in range(MAX_ITER):
+    emit(f"[router_http] iteration {iteration + 1}/{MAX_ITER} — calling {endpoint}")
+    status, raw = chat_request(messages)
+
+    # ── Rate-limit check ──────────────────────────────────────────────────────
+    if status == 429:
+        emit(f"[router_http] HTTP 429 rate-limited")
+        rate_limited = True
+        break
+
+    # ── Quota pattern inside body ─────────────────────────────────────────────
+    import re as _re
+    if _re.search(r"rate.limit|quota.exceeded|token.limit|billing_hard_limit|insufficient_quota",
+                  raw, _re.IGNORECASE):
+        emit(f"[router_http] quota/rate-limit pattern in body")
+        rate_limited = True
+        break
+
+    if status not in (200, 201):
+        emit(f"[router_http] HTTP {status} error: {raw[:500]}")
+        error_exit = True
+        break
+
+    # ── Parse response ────────────────────────────────────────────────────────
+    try:
+        resp_json = json.loads(raw)
+    except Exception as e:
+        emit(f"[router_http] JSON parse error: {e}\nRaw: {raw[:500]}")
+        error_exit = True
+        break
+
+    choices = resp_json.get("choices", [])
+    if not choices:
+        emit(f"[router_http] no choices in response")
+        break
+
+    choice  = choices[0]
+    message = choice.get("message", {})
+    finish  = choice.get("finish_reason", "")
+
+    # Emit text content to log
+    text_content = message.get("content") or ""
+    if text_content:
+        emit(text_content)
+
+    tool_calls = message.get("tool_calls") or []
+
+    # Append assistant turn
+    messages.append({
+        "role":       "assistant",
+        "content":    text_content or None,
+        "tool_calls": tool_calls if tool_calls else None,
+    })
+    # Clean None values
+    messages[-1] = {k: v for k, v in messages[-1].items() if v is not None}
+
+    # ── Execute tool calls ────────────────────────────────────────────────────
+    if tool_calls:
+        for tc in tool_calls:
+            tc_id   = tc.get("id", "")
+            tc_name = tc.get("function", {}).get("name", "")
+            tc_args_raw = tc.get("function", {}).get("arguments", "{}")
+            try:
+                tc_args = json.loads(tc_args_raw)
+            except Exception:
+                tc_args = {}
+
+            emit(f"[router_http] tool_call: {tc_name}({json.dumps(tc_args, ensure_ascii=False)[:200]})")
+            result = execute_tool(tc_name, tc_args)
+            emit(f"[router_http] tool_result: {str(result)[:500]}")
+
+            messages.append({
+                "role":         "tool",
+                "tool_call_id": tc_id,
+                "content":      str(result),
+            })
+        # Continue loop to send tool results back
+        continue
+
+    # ── No tool calls → done ──────────────────────────────────────────────────
+    if finish in ("stop", "end_turn", ""):
+        emit(f"[router_http] finish_reason={finish!r} — done after {iteration + 1} iteration(s)")
+        break
+
+    # Unexpected finish reason — stop anyway
+    emit(f"[router_http] unexpected finish_reason={finish!r} — stopping")
+    break
+
+else:
+    emit(f"[router_http] reached max iterations ({MAX_ITER})")
+
+# ── Write log file ────────────────────────────────────────────────────────────
+os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
+with open(log_file, "w", encoding="utf-8") as fh:
+    fh.write("\n".join(log_lines) + "\n")
+
+if rate_limited:
+    sys.exit(2)
+if error_exit:
+    sys.exit(1)
+sys.exit(0)
+PYEOF
+}
+
 # ── run_driver ────────────────────────────────────────────────────────────────
 # Main driver entry point implementing the ExecutionDriver contract (spec §8.2).
 #
@@ -268,14 +628,46 @@ run_driver() {
     local system_prompt
     system_prompt="$(_assemble_system_prompt "${stage}" "${work_dir}")"
 
-    # ── Build JSON body via Python (safe multi-line handling) ─────────────────
-    local sys_tmp usr_tmp body_tmp
+    # ── Write prompts to temp files ───────────────────────────────────────────
+    local sys_tmp usr_tmp
     sys_tmp="$(mktemp)"
     usr_tmp="$(mktemp)"
-    body_tmp="$(mktemp)"
 
     printf '%s' "${system_prompt}" > "${sys_tmp}"
     printf '%s' "${task_prompt}"   > "${usr_tmp}"
+
+    log_step "[${stage}] router_http → ${endpoint} (model: ${model})"
+
+    # ── Decide mode: tool calling vs streaming ────────────────────────────────
+    if _stage_uses_tools "${stage}"; then
+        # ── Agentic tool-calling loop (non-streaming) ─────────────────────────
+        log_step "[${stage}] using agentic tool-calling loop"
+        local loop_exit=0
+        _run_agentic_loop \
+            "${endpoint}" "${token}" "${model}" \
+            "${sys_tmp}" "${usr_tmp}" \
+            "${work_dir}" "${stage}" "${log_file}" || loop_exit=$?
+
+        # sys_tmp / usr_tmp are deleted inside the Python script
+        case "${loop_exit}" in
+            0)
+                log_ok "[${stage}] router_http agentic loop completed"
+                return 0
+                ;;
+            2)
+                log_warn "[${stage}] Quota/rate-limit — exit 2 for quota_retry"
+                return 2
+                ;;
+            *)
+                log_error "[${stage}] Agentic loop failed (exit ${loop_exit})"
+                return 1
+                ;;
+        esac
+    fi
+
+    # ── Assessment stage: one-shot streaming (original behaviour) ─────────────
+    local body_tmp
+    body_tmp="$(mktemp)"
 
     python3 - "${model}" "${sys_tmp}" "${usr_tmp}" > "${body_tmp}" <<'PYEOF'
 import sys, json, os
@@ -304,9 +696,7 @@ body = {
 print(json.dumps(body, ensure_ascii=False))
 PYEOF
 
-    log_step "[${stage}] router_http → ${endpoint} (model: ${model})"
-
-    # ── HTTP request ──────────────────────────────────────────────────────────
+    # ── HTTP request (streaming) ──────────────────────────────────────────────
     local http_status_tmp
     http_status_tmp="$(mktemp)"
     local curl_exit=0
