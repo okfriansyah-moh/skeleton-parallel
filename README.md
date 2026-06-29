@@ -87,6 +87,8 @@ skeleton integrate
 # Edit config/skeleton.yaml:
 #   execution:
 #     driver: router_http
+#     cli:
+#       provider: claude    # ← must be claude (not copilot) when using 9router
 #   router:
 #     combo: project-default
 
@@ -115,11 +117,15 @@ skeleton router health              # confirm token is accepted
 skeleton auth --provider=9router    # full pre-flight pass (should show ✓ for both)
 
 # ── Step 6: Enrich PLAN.md for skeleton execution ─────────────────────────────
+# Source inject-env.sh first so ANTHROPIC_BASE_URL is set before claude CLI runs.
+# (This redirects claude → 9router → Anthropic instead of calling Anthropic directly)
+source router/inject-env.sh
+
 # docs/PLAN.md already exists from a2a-brainstorm — enrich it with task IDs,
 # dependency chain, file ownership, and acceptance criteria checkboxes.
 skeleton plan --from=docs/PLAN.md
-# → reads docs/PLAN.md, spawns enrichment agent via 9router
-# → adds T-001…T-008 IDs, Depends:, Files:, Acceptance: checkboxes
+# → reads docs/PLAN.md, spawns claude agent routed through 9router
+# → adds T-001…T-018 IDs, Depends:, Files:, Acceptance: checkboxes
 # → rewrites docs/PLAN.md in skeleton execution format
 
 # ── Step 7: Validate everything ───────────────────────────────────────────────
@@ -338,6 +344,7 @@ router:
 ```sh
 skeleton router health              # HTTP 200 from localhost:20128/api/health
 skeleton auth --provider=9router    # ✓ Running, ✓ inject-env.sh found
+source router/inject-env.sh         # load env vars into your shell before running agents
 skeleton router stop                # stop daemon when done
 ```
 
