@@ -3384,7 +3384,8 @@ _plan_spawn_agent() {
     case "${_provider}" in
         claude)
             ( cd "${_work_dir}"
-              unset ANTHROPIC_BASE_URL   # use claude CLI's own OAuth directly, not 9router
+              unset ANTHROPIC_BASE_URL  # bypass 9router — claude CLI uses its own OAuth
+              unset ANTHROPIC_API_KEY   # don't send a 9router key to api.anthropic.com
               claude -p "${_prompt}" \
                   --model="${AGENT_MODEL}" \
                   --allowedTools none \
@@ -3426,13 +3427,14 @@ _plan_spawn_agent() {
         return 1
     fi
 
-    # Reject output that is just a CLI error (no plan content found)
-    if grep -qi "there's an issue with the selected model\|unknown model\|error:\|Rate limit" "${_agent_out}" 2>/dev/null \
-        && ! grep -q "^# PLAN" "${_agent_out}" 2>/dev/null; then
-        log_error "Agent returned an error instead of a plan:"
-        head -3 "${_agent_out}" >&2
+    # Require a valid plan header — any output without "# PLAN" is an error, never write it
+    if ! grep -q "^# PLAN" "${_agent_out}" 2>/dev/null; then
+        log_error "Agent did not produce a valid plan (missing '# PLAN' header)."
+        log_info "  Agent output (first 3 lines):"
+        head -3 "${_agent_out}" | sed 's/^/    /' >&2
         rm -f "${_agent_out}"
-        log_info "  Fix: check AGENT_MODEL is correct (e.g. claude-sonnet-4-6) and 9router is running."
+        log_info "  Your original PLAN.md was NOT modified."
+        log_info "  Fix: ensure claude CLI is authenticated and AGENT_MODEL is valid."
         return 1
     fi
 
