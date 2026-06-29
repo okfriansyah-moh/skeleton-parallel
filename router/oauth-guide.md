@@ -1,91 +1,170 @@
-# router/oauth-guide.md — 9router OAuth Connection Guide
+# router/oauth-guide.md — 9router Dashboard Setup Guide
 
 ## Overview
 
-`skeleton router oauth` sets up OAuth tokens that 9router uses to proxy requests
-to your AI provider. After completing OAuth, the tokens are written to
-`router/inject-env.sh` which is sourced by CLI drivers before each agent call.
+9router is a local proxy daemon at `http://localhost:20128`. It sits between
+skeleton and the actual AI provider (Claude, Copilot, OpenAI). Instead of
+calling `api.anthropic.com` directly, skeleton calls `localhost:20128/v1` and
+9router forwards the request using the API key you configure here.
+
+**Dashboard:** `http://localhost:20128/dashboard`
 
 ---
 
-## Step-by-Step Setup
+## How the Dashboard is Organized
 
-### Prerequisites
+| Section | What it does |
+|---------|-------------|
+| **Providers** | Where you add AI providers and enter their API keys |
+| **Combos** | Named groups of providers — skeleton references this by name |
+| **Endpoint & Key** | Shows the local URL skeleton uses (`http://localhost:20128/v1`) |
+| **Usage** | Request logs, token counts, cost tracking |
 
-1. 9router installed and running:
-
-   ```
-   skeleton router install
-   skeleton router start
-   skeleton router status   # verify: Running: yes
-   ```
-
-2. Open the 9router dashboard:
-   ```
-   http://localhost:20128
-   ```
+**The setup order is always:** Providers → Combos → create `inject-env.sh`
 
 ---
 
-## Provider A — GitHub Copilot
+## Prerequisites
 
-1. In the 9router dashboard → **Connections** → **Add Provider** → **GitHub Copilot**
-2. Click **Authorize with GitHub** and complete the OAuth flow in your browser
-3. After authorization, 9router shows a connection token
-4. Copy the connection token to `router/inject-env.sh`:
+9router installed and running:
 
-   ```bash
-   # router/inject-env.sh
-   export COPILOT_PROXY_URL="http://localhost:20128/v1"
-   export COPILOT_GITHUB_TOKEN="<token-from-9router-dashboard>"
-   ```
+```sh
+skeleton router install
+skeleton router start
+skeleton router status   # verify: Running: yes, Health: OK
+```
 
-5. Restart to apply:
-   ```
-   skeleton router stop && skeleton router start
-   ```
+Open the 9router dashboard: `http://localhost:20128/dashboard`
 
 ---
 
-## Provider B — Anthropic Claude
+## Provider A — Anthropic Claude
 
-1. In the 9router dashboard → **Connections** → **Add Provider** → **Claude**
-2. Enter your Anthropic API key (from https://console.anthropic.com)
-3. 9router validates the key and assigns a proxy endpoint
-4. Copy settings to `router/inject-env.sh`:
+### 1. Add Claude as a Provider
 
-   ```bash
-   # router/inject-env.sh
-   export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
-   export ANTHROPIC_API_KEY="<your-anthropic-key>"
-   ```
+Dashboard → sidebar **Providers** → **+ Add** → choose **Claude**
+
+Enter your Anthropic API key (get it from https://console.anthropic.com):
+
+```
+sk-ant-api03-...
+```
+
+Click **Save**. 9router stores the key internally and uses it to forward requests.
+
+### 2. Create a Combo
+
+Dashboard → sidebar **Combos** → **+ Create**
+
+- **Name:** `project-default`
+- Add the Claude provider you just created
+- Click **Save**
+
+A combo is a named routing group. `config/skeleton.yaml` references it by name.
+You can add multiple providers to a combo for fallback/round-robin later.
+
+### 3. Note the Endpoint
+
+Dashboard → sidebar **Endpoint & Key**
+
+You'll see:
+```
+API Endpoint: http://localhost:20128/v1
+```
+
+This is `ANTHROPIC_BASE_URL` — the address skeleton uses instead of `api.anthropic.com`.
+
+### 4. Create `router/inject-env.sh`
+
+In your project directory:
+
+```bash
+mkdir -p router
+cat > router/inject-env.sh << 'EOF'
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_API_KEY="sk-ant-your-actual-key-here"
+EOF
+chmod 600 router/inject-env.sh
+```
+
+> **Why does `ANTHROPIC_API_KEY` still need a value?** The Claude CLI must send
+> something in the `Authorization` header or it refuses to start. Since
+> "Require API key" is OFF in 9router, 9router ignores this value — but the
+> header must be present. Set it to your real Anthropic key.
 
 ---
 
-## Provider C — OpenAI Codex
+## Provider B — GitHub Copilot
 
-1. In the 9router dashboard → **Connections** → **Add Provider** → **OpenAI**
-2. Enter your OpenAI API key (from https://platform.openai.com/api-keys)
-3. Copy settings to `router/inject-env.sh`:
+### 1. Add Copilot as a Provider
 
-   ```bash
-   # router/inject-env.sh
-   export OPENAI_BASE_URL="http://localhost:20128/v1"
-   export OPENAI_API_KEY="<your-openai-key>"
-   ```
+Dashboard → sidebar **Providers** → **+ Add** → choose **GitHub Copilot**
+
+Click **Authorize with GitHub** and complete the OAuth flow in your browser.
+After authorization, 9router stores the GitHub token.
+
+### 2. Create or Update a Combo
+
+Dashboard → **Combos** → add Copilot to your existing combo, or create a new one:
+
+- **Name:** `project-copilot`
+- Add the GitHub Copilot provider → **Save**
+
+### 3. Create `router/inject-env.sh`
+
+```bash
+# router/inject-env.sh
+export COPILOT_PROXY_URL="http://localhost:20128/v1"
+# ANTHROPIC_API_KEY not needed for Copilot-only setups
+```
+
+Update `config/skeleton.yaml`:
+
+```yaml
+router:
+  combo: project-copilot
+```
+
+---
+
+## Provider C — OpenAI / Codex
+
+### 1. Add OpenAI as a Provider
+
+Dashboard → sidebar **Providers** → **+ Add** → choose **OpenAI**
+
+Enter your OpenAI API key (from https://platform.openai.com/api-keys).
+
+### 2. Create a Combo
+
+Dashboard → **Combos** → **+ Create** → name `project-openai` → add OpenAI → **Save**
+
+### 3. Create `router/inject-env.sh`
+
+```bash
+# router/inject-env.sh
+export OPENAI_BASE_URL="http://localhost:20128/v1"
+export OPENAI_API_KEY="sk-..."
+```
 
 ---
 
 ## Combo Routing
 
-9router supports routing combos — groups of providers used in round-robin or
-priority order. Configure combos in the 9router dashboard under **Combos**.
+A combo can hold multiple providers in priority order. 9router tries the first
+provider; if it returns a quota/rate-limit error, it falls through to the next.
+
+Example multi-provider combo:
+1. Claude (primary)
+2. Copilot (fallback if Claude quota exhausted)
+
+Configure this in **Combos** → edit your combo → drag providers to set order.
 
 The active combo is set in `config/skeleton.yaml`:
 
 ```yaml
 router:
-  combo: project-default # name of your combo in 9router dashboard
+  combo: project-default
 ```
 
 ---
@@ -93,16 +172,17 @@ router:
 ## Verifying the Connection
 
 ```bash
-skeleton router health    # exit 0 if 9router is up and responding
-skeleton router status    # prints provider connection details
+skeleton router health              # exit 0 if 9router is up and responding
+skeleton auth --provider=9router    # full pre-flight: daemon ✓ + inject-env.sh ✓
 ```
 
-To test a provider:
+Test a live request:
 
 ```bash
 curl http://localhost:20128/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-sonnet-4.6","messages":[{"role":"user","content":"ping"}]}'
+  -H "Authorization: Bearer sk-ant-your-key" \
+  -d '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"ping"}]}'
 ```
 
 ---
@@ -112,7 +192,7 @@ curl http://localhost:20128/v1/chat/completions \
 - `router/inject-env.sh` may contain API keys — it is `chmod 600` by default
 - Never commit `router/inject-env.sh` to source control
 - Add to `.gitignore`: `router/inject-env.sh`
-- The 9router dashboard is local-only (port 20128) — not exposed externally
+- The 9router dashboard is local-only (port 20128) — not exposed to the network
 
 ---
 
@@ -121,7 +201,8 @@ curl http://localhost:20128/v1/chat/completions \
 | Symptom                   | Fix                                                           |
 | ------------------------- | ------------------------------------------------------------- |
 | `health check failed`     | Run `skeleton router start`                                   |
-| `inject-env.sh not found` | Run `skeleton router install`                                 |
-| Agent sees 401/403        | Re-run OAuth for that provider                                |
+| `inject-env.sh not found` | Create it (see steps above)                                   |
+| Agent sees 401/403        | Check Anthropic API key is correct in Providers               |
 | Port 20128 in use         | Set `NINE_ROUTER_PORT` env var, update `config/skeleton.yaml` |
-| 9router not starting      | Check `skeleton router status`, try `skeleton router install` |
+| 9router not starting      | Check logs: `cat .skeleton-dev/9router.log`                   |
+| Dashboard blank/error     | Open `http://localhost:20128/dashboard` (not just `/`)        |

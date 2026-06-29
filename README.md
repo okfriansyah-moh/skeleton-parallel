@@ -90,13 +90,29 @@ skeleton integrate
 #   router:
 #     combo: project-default
 
-# Open http://localhost:20128/dashboard → Connections → add Claude → copy token.
-# Create router/inject-env.sh (chmod 600, never commit):
-#   export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
-#   export ANTHROPIC_API_KEY="<token-from-dashboard>"
+# Open http://localhost:20128/dashboard and do 3 things:
+#
+# 1. Sidebar → "Providers" → Add → choose Claude
+#    Enter your Anthropic API key (sk-ant-...) → Save
+#    (9router uses this key to call Claude on your behalf)
+#
+# 2. Sidebar → "Combos" → Create combo
+#    Name: project-default → add the Claude provider you just created → Save
+#    (a combo is a named routing group — skeleton.yaml points to it by name)
+#
+# 3. The endpoint is already shown on "Endpoint & Key" page:
+#    API Endpoint: http://localhost:20128/v1  ← this is ANTHROPIC_BASE_URL
+#
+# Create router/inject-env.sh in your project (chmod 600, never commit):
+mkdir -p router
+cat > router/inject-env.sh << 'ENVEOF'
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_API_KEY="sk-ant-your-actual-key-here"
+ENVEOF
+chmod 600 router/inject-env.sh
 
 skeleton router health              # confirm token is accepted
-skeleton auth --provider=9router    # full pre-flight pass
+skeleton auth --provider=9router    # full pre-flight pass (should show ✓ for both)
 
 # ── Step 6: Enrich PLAN.md for skeleton execution ─────────────────────────────
 # docs/PLAN.md already exists from a2a-brainstorm — enrich it with task IDs,
@@ -264,35 +280,65 @@ skeleton run --dry-run --parallel
 
 **5. Set up 9router for multi-provider routing** · `skeleton router`
 
-9router is a local daemon that proxies agent calls through a single OpenAI-compatible endpoint, enabling quota rotation, provider fallback, and OAuth token management. Required only when `driver: router_http` in `config/skeleton.yaml`.
+9router is a local proxy daemon — a middleman that sits between skeleton and the actual AI provider (Claude, Copilot, Codex). Instead of calling Claude's API directly, skeleton sends requests to `http://localhost:20128/v1` (your laptop), and 9router forwards them. This lets you rotate quotas, add fallback providers, and manage API keys from one dashboard. Required only when `driver: router_http` in `config/skeleton.yaml`.
 
 ```sh
 skeleton router install   # npm install -g 9router (github.com/decolua/9router)
 skeleton router start     # start daemon on localhost:20128
 skeleton router status    # verify: Running: yes, Health: OK
-skeleton router oauth     # print OAuth setup guide for each provider
 ```
 
-After `start`, open `http://localhost:20128/dashboard` → **Connections** → add your provider (Claude, Copilot, Codex) → copy the token into `router/inject-env.sh`:
+**9router dashboard walkthrough** — open `http://localhost:20128/dashboard` and complete 3 steps:
+
+**Step A — Add a Provider (your AI key lives here)**
+
+> Sidebar → **Providers** → **+ Add** → choose **Claude**
+> Enter your Anthropic API key (`sk-ant-...`) → **Save**
+
+This is where you tell 9router which API key to use when forwarding requests to Claude. 9router stores it internally — your code never touches the key directly.
+
+**Step B — Create a Combo (a named routing group)**
+
+> Sidebar → **Combos** → **+ Create**
+> Name: `project-default` → add the Claude provider you created → **Save**
+
+`config/skeleton.yaml` references this combo by name (`combo: project-default`). A combo lets you add fallback providers later (e.g. switch to Codex if Claude quota is exhausted) without changing any code.
+
+**Step C — Note the Endpoint (your local API URL)**
+
+> Sidebar → **Endpoint & Key**
+> You'll see: `API Endpoint: http://localhost:20128/v1`
+
+This is `ANTHROPIC_BASE_URL` — the local address skeleton uses instead of `api.anthropic.com`. No "Require API key" toggle needed; leave it off for local-only use.
+
+**Create `router/inject-env.sh`** in your project (chmod 600, never commit):
 
 ```bash
-# router/inject-env.sh  (chmod 600, never commit)
+mkdir -p router
+cat > router/inject-env.sh << 'EOF'
 export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
-export ANTHROPIC_API_KEY="<your-key>"
+export ANTHROPIC_API_KEY="sk-ant-your-actual-key-here"
+EOF
+chmod 600 router/inject-env.sh
 ```
 
-Then set `driver: router_http` in `config/skeleton.yaml`:
+> **Why does `ANTHROPIC_API_KEY` still need a real key?** The Claude CLI (or any OpenAI-compatible client) must send *some* value in the `Authorization` header. Since "Require API key" is off in 9router, it ignores this value — but the header must still be present. Set it to your actual Anthropic key; 9router will use the key you configured under Providers.
+
+**Set `driver: router_http` in `config/skeleton.yaml`:**
 
 ```yaml
 execution:
   driver: router_http
 router:
-  combo: project-default   # combo configured in 9router dashboard
+  combo: project-default   # matches the combo name from Step B above
 ```
 
+**Verify everything works:**
+
 ```sh
-skeleton router health    # confirm the daemon is responding
-skeleton router stop      # stop daemon when done
+skeleton router health              # HTTP 200 from localhost:20128/api/health
+skeleton auth --provider=9router    # ✓ Running, ✓ inject-env.sh found
+skeleton router stop                # stop daemon when done
 ```
 
 Skip this step entirely if using `driver: cli_subscription` (claude/copilot/codex CLI direct — no daemon needed).
