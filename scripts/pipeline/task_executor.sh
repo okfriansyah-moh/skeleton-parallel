@@ -117,12 +117,16 @@ prompt = f"""# Task {task_n} — {task.get("name", "")}
 
 > IMPLEMENTATION MODE: Implement this task immediately and completely.
 > Do NOT ask clarifying questions. Do NOT request design approval.
-> Do NOT say "I need more information". Create all files now.
-> For each file: output a fenced code block with the file path on the opening fence line.
-> Example:
->   ```python backend/modules/market_data/models.py
->   <file content here>
->   ```
+> Do NOT say "I need more information". Write all files now using the write_file tool.
+>
+> You have these tools available — USE THEM to write actual files to disk:
+>   - write_file(path, content)  ← create/overwrite a file
+>   - read_file(path)            ← read an existing file
+>   - list_directory(path)       ← list directory contents
+>   - run_bash(command)          ← run shell commands (install deps, run linters, etc.)
+>
+> For EACH file in "Files to create": call write_file with the full relative path and
+> complete file content. Do NOT output code blocks in text — call write_file directly.
 > Write complete, production-ready code. Commit nothing — the pipeline handles git.
 
 **Status:** {task.get("status", "pending")}
