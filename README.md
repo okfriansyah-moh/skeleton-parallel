@@ -65,65 +65,69 @@ skeleton-parallel's natural entry point is a structured architecture document an
 **Real example: idx-signal-system** — self-hosted IDX stock screening, 8 build phases (data layer, scoring engine, backtest, flow/news/sector, Tier B scout, delivery, calibration).
 
 ```sh
-# ── Phase 1: Design with a2a-brainstorm ──────────────────────────────────────
-# Already done — a2a produces architecture.md + plan.md from multi-agent session.
-# The plan.md has goals, tech stack, project structure, and task definitions.
-cp ~/Downloads/idx-signal-plan.md idx-signals-systems/docs/plan.md
+# ── Step 1: Start 9router ─────────────────────────────────────────────────────
+skeleton router install   # npm install -g 9router (github.com/decolua/9router)
+skeleton router start     # start daemon — http://localhost:20128/dashboard
+skeleton router status    # verify: Running: yes, Health: OK
 
-# ── Phase 2: Scaffold + wire skeleton ────────────────────────────────────────
-cd idx-signals-systems
+# ── Step 2: Auth check ────────────────────────────────────────────────────────
+cd /path/to/idx-signals-systems
+skeleton auth --provider=9router   # verify daemon is up before any agent work
 
-# Step 0 — verify provider auth before any agent spawning
-skeleton auth --provider=claude        # or copilot | codex | 9router (alias: router_http)
-# → checks CLI binary is installed and authenticated
-# → exits with clear install/auth instructions if not ready
-
-# Scaffold the Python backend (additive — won't touch docs/ or existing dirs)
+# ── Step 3: Scaffold Python backend ──────────────────────────────────────────
+# Additive — never touches existing docs/ or other directories
 skeleton init python --role=backend --root=backend/ --name=idx-signals-system
 skeleton init python --role=mcp-server --root=mcp-server/ --name=idx-signals-mcp
 
-# Wire skeleton at the project root: .ai/, config/skeleton.yaml, hooks
+# ── Step 4: Wire skeleton at project root ─────────────────────────────────────
 skeleton integrate
+# → creates .ai/manifest.yaml, config/skeleton.yaml, scripts/hooks/
 
-# ── Phase 3: Set up 9router ───────────────────────────────────────────────────
-skeleton router install   # npm install -g 9router (github.com/decolua/9router)
-skeleton router start     # start daemon on localhost:20128
-skeleton router status    # verify: Running: yes, Health: OK
+# ── Step 5: Configure 9router driver ─────────────────────────────────────────
+# Edit config/skeleton.yaml:
+#   execution:
+#     driver: router_http
+#   router:
+#     combo: project-default
 
-# Open http://localhost:20128 → Connections → add Claude → copy token:
-# router/inject-env.sh  (chmod 600, never commit)
-# export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
-# export ANTHROPIC_API_KEY="<your-key>"
+# Open http://localhost:20128/dashboard → Connections → add Claude → copy token.
+# Create router/inject-env.sh (chmod 600, never commit):
+#   export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+#   export ANTHROPIC_API_KEY="<token-from-dashboard>"
 
-skeleton router health    # confirm daemon is responding
+skeleton router health              # confirm token is accepted
+skeleton auth --provider=9router    # full pre-flight pass
 
-# Set driver in config/skeleton.yaml:
-# execution:
-#   driver: router_http
-# router:
-#   combo: project-default
+# ── Step 6: Enrich PLAN.md for skeleton execution ─────────────────────────────
+# docs/PLAN.md already exists from a2a-brainstorm — enrich it with task IDs,
+# dependency chain, file ownership, and acceptance criteria checkboxes.
+skeleton plan --from=docs/PLAN.md
+# → reads docs/PLAN.md, spawns enrichment agent via 9router
+# → adds T-001…T-008 IDs, Depends:, Files:, Acceptance: checkboxes
+# → rewrites docs/PLAN.md in skeleton execution format
 
-# ── Phase 4: Generate docs/PLAN.md ───────────────────────────────────────────
-# Import and enrich the a2a plan into skeleton's execution format
-skeleton plan --from=docs/plan.md
-# reads docs/plan.md (a2a output: 8 tasks with goal, files, validation)
-# → spawns enrichment agent via 9router
-# → adds T-001…T-008 IDs, Depends: chain, Files: paths, Acceptance: checkboxes
-# → writes docs/PLAN.md (skeleton execution format, ready for skeleton run)
-
-# ── Phase 5: Validate and execute ────────────────────────────────────────────
+# ── Step 7: Validate everything ───────────────────────────────────────────────
 skeleton doctor
 # → ✓ .ai/manifest.yaml, config/skeleton.yaml, docs/PLAN.md
 # → ✓ driver: router_http → 9router health OK
-# → ✓ 8 tasks in docs/PLAN.md
+# → ✓ 8 tasks found in docs/PLAN.md
 # → ✓ scripts/hooks/quality-gates.sh
 
-skeleton run --dry-run      # preview full execution plan before touching code
+# ── Step 8: Dry run ───────────────────────────────────────────────────────────
+skeleton run --dry-run    # preview full execution plan without touching code
 
-skeleton run 1              # Phase 1 only: data layer (market_data module)
-skeleton run 1 2 3          # Phases 1–3: data + scoring + backtest runner
-skeleton run --parallel 4 5 # Phases 4 & 5 in parallel worktrees
-skeleton run --full         # all 8 phases, quality gates, auto PR
+# ── Step 9: Execute ───────────────────────────────────────────────────────────
+skeleton run 1              # T-001: market_data layer
+skeleton run 2              # T-002: scoring engine (technicals)
+skeleton run 3              # T-003: backtest runner
+skeleton run --parallel 4 5 # T-004 & T-005 in parallel worktrees
+skeleton run 6              # T-006: Tier B scout + promotion
+skeleton run 7              # T-007: delivery + scheduler
+skeleton run 8              # T-008: calibration + Telegram approval
+skeleton run --full         # or run all 8 phases end-to-end
+
+# ── When done ─────────────────────────────────────────────────────────────────
+skeleton router stop
 ```
 
 The 8 tasks generated for idx-signal-system:
