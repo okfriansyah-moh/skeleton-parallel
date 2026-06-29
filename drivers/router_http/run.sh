@@ -648,6 +648,18 @@ for iteration in range(MAX_ITER):
 
     tool_calls = message.get("tool_calls") or []
 
+    # ── Detect zero-output response (model doesn't support tool calling) ──────
+    # cu/default (Cursor AI) returns finish_reason='stop', content=null,
+    # tool_calls=[], completion_tokens=0. Retry so the round-robin advances
+    # to a tool-capable model (cc/claude-sonnet-4-6 or cx/gpt-5.4).
+    usage = resp_json.get("usage", {})
+    comp_tokens = usage.get("completion_tokens", -1)
+    if not text_content and not tool_calls and comp_tokens == 0:
+        actual_model = resp_json.get("model", "unknown")
+        emit(f"[router_http] zero-output from model={actual_model!r} (no tool support?) — retrying next slot")
+        # Don't append this empty turn; just retry the same messages
+        continue
+
     # Append assistant turn
     messages.append({
         "role":       "assistant",
