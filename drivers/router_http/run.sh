@@ -271,6 +271,31 @@ with open(usr_file, encoding="utf-8") as f:
 os.unlink(sys_file)
 os.unlink(usr_file)
 
+# ── Model-aware max_tokens ────────────────────────────────────────────────────
+# Output token limits vary by model family. We pick the highest safe value
+# supported by each family so the model is never artificially truncated.
+def _max_tokens_for_model(m):
+    m = m.lower()
+    # Claude 4.x family: 32k output
+    if "claude" in m and any(v in m for v in ("opus-4", "sonnet-4", "haiku-4")):
+        return 32000
+    # Claude 3.x / older: 8k output
+    if "claude" in m:
+        return 8192
+    # GPT-5.x / GPT-4.x: 32k output
+    if "gpt-5" in m or "gpt-4" in m:
+        return 32000
+    # Cursor/Codex: 32k
+    if "codex" in m or "composer" in m:
+        return 32000
+    # Kimi / Gemini
+    if "kimi" in m or "gemini" in m:
+        return 32000
+    # Safe default for unknown models
+    return 16384
+
+MAX_TOKENS = _max_tokens_for_model(model)
+
 # ── Tool definitions ──────────────────────────────────────────────────────────
 TOOLS = [
     {
@@ -428,7 +453,7 @@ def chat_request(messages):
         "messages":   messages,
         "tools":      TOOLS,
         "stream":     False,
-        "max_tokens": 16384,
+        "max_tokens": MAX_TOKENS,
     }
     data = json.dumps(body, ensure_ascii=False).encode()
     headers = {"Content-Type": "application/json"}
@@ -682,6 +707,20 @@ with open(usr_file, encoding="utf-8") as f:
     user_content = f.read()
 
 os.unlink(sys_file)
+
+def _max_tokens_for_model(m):
+    m = m.lower()
+    if "claude" in m and any(v in m for v in ("opus-4", "sonnet-4", "haiku-4")):
+        return 32000
+    if "claude" in m:
+        return 8192
+    if "gpt-5" in m or "gpt-4" in m:
+        return 32000
+    if "codex" in m or "composer" in m:
+        return 32000
+    if "kimi" in m or "gemini" in m:
+        return 32000
+    return 16384
 os.unlink(usr_file)
 
 body = {
@@ -691,7 +730,7 @@ body = {
         {"role": "user",   "content": user_content},
     ],
     "stream":     True,
-    "max_tokens": 16384,
+    "max_tokens": _max_tokens_for_model(model),
 }
 print(json.dumps(body, ensure_ascii=False))
 PYEOF
