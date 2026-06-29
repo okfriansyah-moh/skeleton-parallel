@@ -81,42 +81,65 @@ invoke_agent() {
         return 3
     fi
 
-    if ! command -v copilot &>/dev/null; then
-        log_error "[${stage}] Copilot CLI not found. Install: npm install -g @githubnext/github-copilot-cli"
-        return 3
-    fi
+    mkdir -p "$(dirname "${log_file}")"
 
-    local skills_csv
-    skills_csv="$(build_skills_csv)"
+    local driver="${SKELETON_DRIVER:-cli_subscription}"
+    local provider="${SKELETON_PROVIDER:-copilot}"
 
-    local stage_prompt
-    stage_prompt="$(cat "${prompt_file}")"
+    log_step "[${stage}] Invoking agent: ${BOLD}${agent}${NC} (model: ${model})"
 
-    # Build full prompt: task content + mandatory skill injection + workspace constraint
-    local full_prompt
-    full_prompt="${stage_prompt}
+    local exit_code=0
+
+    case "${driver}" in
+        router_http)
+            bash "${_AGENT_LIB_DIR}/../../drivers/router_http/run.sh" \
+                "router_http" "${stage}" "${work_dir}" "${prompt_file}" "${model}" "${log_file}"
+            exit_code=$?
+            ;;
+        cli_subscription)
+            case "${provider}" in
+                claude)
+                    bash "${_AGENT_LIB_DIR}/../../drivers/cli/claude.sh" \
+                        "cli_subscription" "${stage}" "${work_dir}" "${prompt_file}" "${model}" "${log_file}"
+                    exit_code=$?
+                    ;;
+                codex)
+                    bash "${_AGENT_LIB_DIR}/../../drivers/cli/codex.sh" \
+                        "cli_subscription" "${stage}" "${work_dir}" "${prompt_file}" "${model}" "${log_file}"
+                    exit_code=$?
+                    ;;
+                *)
+                    # copilot — uses named --agent flag
+                    if ! command -v copilot &>/dev/null; then
+                        log_error "[${stage}] copilot CLI not found. Install: npm install -g @githubnext/github-copilot-cli"
+                        return 3
+                    fi
+                    local skills_csv; skills_csv="$(build_skills_csv)"
+                    local full_prompt
+                    full_prompt="$(cat "${prompt_file}")
 
 STAGE: ${stage}
 MANDATORY: Use skills as primary knowledge source (${skills_csv}).
 Follow the project's AI constraints as defined in .ai/ (ARES canonical source) and the provider harness file.
 ${AGENT_WORKSPACE_CONSTRAINT}"
-
-    mkdir -p "$(dirname "${log_file}")"
-    log_step "[${stage}] Invoking agent: ${BOLD}${agent}${NC} (model: ${model})"
-
-    # Copilot invocation pattern — extracted from run_parallel.sh verbatim
-    (
-        cd "${work_dir}"
-        copilot \
-            -p "${full_prompt}" \
-            --agent="${agent}" \
-            --model="${model}" \
-            --no-ask-user \
-            --allow-all-tools \
-            --autopilot \
-            2>&1 | tee "${log_file}"
-    )
-    local exit_code=${PIPESTATUS[0]}
+                    ( cd "${work_dir}"
+                      copilot \
+                          -p "${full_prompt}" \
+                          --agent="${agent}" \
+                          --model="${model}" \
+                          --no-ask-user \
+                          --allow-all-tools \
+                          --autopilot \
+                          2>&1 | tee "${log_file}" )
+                    exit_code=${PIPESTATUS[0]}
+                    ;;
+            esac
+            ;;
+        *)
+            log_warn "[${stage}] Driver '${driver}' not supported in invoke_agent — skipping"
+            return 0
+            ;;
+    esac
 
     # Map quota/rate-limit patterns to exit code 2 (spec §8.2)
     if grep -qi "quota\|rate.limit\|429\|token limit exceeded\|billing" "${log_file}" 2>/dev/null; then
@@ -129,6 +152,6 @@ ${AGENT_WORKSPACE_CONSTRAINT}"
         return 1
     fi
 
-    log_ok "[${stage}] Agent ${agent} completed successfully"
+    log_ok "[${stage}] ${stage} completed successfully"
     return 0
 }

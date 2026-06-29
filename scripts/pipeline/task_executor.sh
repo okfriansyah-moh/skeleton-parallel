@@ -383,7 +383,7 @@ execute_task() {
     local plan_index="${3:-${PROJECT_ROOT}/.skeleton-dev/plan-index.json}"
     local work_dir="${4:-${PROJECT_ROOT}}"
     local task_label="task-${task_n}"
-    local model="${SKELETON_MODEL:-claude-sonnet-4.6}"
+    local model="${SKELETON_MODEL:-claude-sonnet-4-6}"
     local dev_dir="${work_dir}/.skeleton-dev"
     local log_dir="${dev_dir}/logs"
     local prompt_file="${dev_dir}/TASK_PROMPT.md"

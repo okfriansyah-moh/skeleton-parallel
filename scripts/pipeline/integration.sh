@@ -70,7 +70,7 @@ run_union_merge() {
             local conflict_log="${PROJECT_ROOT}/.skeleton-dev/logs/merge-conflict-${branch//\//-}-${attempt}.log"
             mkdir -p "$(dirname "${conflict_log}")"
 
-            local model="${SKELETON_MODEL:-claude-sonnet-4.6}"
+            local model="${SKELETON_MODEL:-claude-sonnet-4-6}"
             local prompt_file
             prompt_file="$(mktemp)"
 
@@ -135,7 +135,7 @@ run_post_merge_review() {
     while (( attempt < MAX_RETRIES_REVIEW )); do
         (( attempt++ ))
 
-        local model="${SKELETON_MODEL:-claude-sonnet-4.6}"
+        local model="${SKELETON_MODEL:-claude-sonnet-4-6}"
         local log_file="${work_dir}/.skeleton-dev/logs/post-merge-review-${attempt}.log"
         mkdir -p "$(dirname "${log_file}")"
 
@@ -188,7 +188,7 @@ run_docs_sync() {
 
     log_step "[4] Docs sync (advisory)"
 
-    local model="${SKELETON_MODEL:-claude-sonnet-4.6}"
+    local model="${SKELETON_MODEL:-claude-sonnet-4-6}"
     local log_file="${work_dir}/.skeleton-dev/logs/docs-sync.log"
     mkdir -p "$(dirname "${log_file}")"
 
