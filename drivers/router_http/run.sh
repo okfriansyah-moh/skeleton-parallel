@@ -90,24 +90,36 @@ _assemble_system_prompt() {
     parts+=("## Skills"$'\n'"MANDATORY: Use the following skills as primary knowledge sources:"$'\n'"${skills_csv}")
 
     # ── Component 3: Project .ai/skills/ — name + description only ───────────
-    # We intentionally omit full SKILL.md bodies to avoid 191KB+ context bloat.
-    # The model only needs the skill name and a one-line description to act on them.
+    # Include the first 25 non-blank lines of each skill body (after frontmatter).
+    # 25 lines ≈ 350 tokens per skill × 30 skills ≈ ~10k tokens total — enough
+    # for the model to apply actual rules (naming, type annotations, forbidden
+    # patterns) without the 191KB bloat of the original full-content approach.
     local ai_skills_dir="${work_dir}/.ai/skills"
     if [[ -d "${ai_skills_dir}" ]]; then
         local skill_summary=""
         while IFS= read -r -d '' skill_file; do
-            # Extract name: and description: from YAML frontmatter (first 20 lines)
-            local name="" desc=""
-            name="$(head -20 "${skill_file}" 2>/dev/null | grep -m1 '^name:' | sed 's/^name:[[:space:]]*//' | tr -d '"'"'" || true)"
-            desc="$(head -20 "${skill_file}" 2>/dev/null | grep -m1 '^description:' | sed 's/^description:[[:space:]]*//' | tr -d '"'"'" || true)"
-            if [[ -n "${name}" ]]; then
-                skill_summary+="- ${name}"
-                [[ -n "${desc}" ]] && skill_summary+=": ${desc}"
-                skill_summary+=$'\n'
+            local excerpt
+            excerpt="$(python3 - "${skill_file}" <<'PYEOF' 2>/dev/null || true
+import sys, pathlib
+lines = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
+# Skip YAML frontmatter (between --- markers)
+body_start = 0
+if lines and lines[0].strip() == "---":
+    for i, l in enumerate(lines[1:], 1):
+        if l.strip() == "---":
+            body_start = i + 1
+            break
+# First 25 non-blank body lines
+body = [l for l in lines[body_start:] if l.strip()]
+print("\n".join(body[:25]))
+PYEOF
+)"
+            if [[ -n "${excerpt}" ]]; then
+                skill_summary+="${excerpt}"$'\n\n---\n'
             fi
         done < <(find "${ai_skills_dir}" -name "SKILL.md" -print0 2>/dev/null | sort -z)
         if [[ -n "${skill_summary}" ]]; then
-            parts+=("## Project Skills"$'\n'"${skill_summary}")
+            parts+=("## Project Skills (key rules — 25 lines each)"$'\n'"${skill_summary}")
         fi
     fi
 
