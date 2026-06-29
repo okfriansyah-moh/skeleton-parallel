@@ -35,8 +35,8 @@ VERSION="$(git -C "${SKELETON_ROOT}" describe --tags --exact-match 2>/dev/null \
 TEMPLATES_DIR="${SKELETON_ROOT}/templates"
 
 # ── Agent Configuration (provider-agnostic) ─────────────────────────────────
-COPILOT_MODEL="${COPILOT_MODEL:-claude-sonnet-4.6}"  # legacy alias honoured
-AGENT_MODEL="${AGENT_MODEL:-${COPILOT_MODEL:-claude-sonnet-4.6}}"
+COPILOT_MODEL="${COPILOT_MODEL:-claude-sonnet-4-6}"  # legacy alias honoured
+AGENT_MODEL="${AGENT_MODEL:-${COPILOT_MODEL:-claude-sonnet-4-6}}"
 COPILOT_LOG_DIR=".parallel-dev/agent-logs"
 # All 28 skills — injected into every agent prompt
 COPILOT_SKILLS="dto, pipeline, modularity, determinism, idempotency, failure, config-validation, code-quality, coding-standards, database-portability, docs-sync, conflict-resolution, token-optimization, running-prompt, security-audit, test-generation, vertical-slice, api-design, project-scaffold, dependency-analysis, migration-management, performance-optimization, caveman, brainstorming, plan-management, subagent-driven-development, test-driven-development, rtk"
@@ -3425,6 +3425,16 @@ _plan_spawn_agent() {
         return 1
     fi
 
+    # Reject output that is just a CLI error (no plan content found)
+    if grep -qi "there's an issue with the selected model\|unknown model\|error:\|Rate limit" "${_agent_out}" 2>/dev/null \
+        && ! grep -q "^# PLAN" "${_agent_out}" 2>/dev/null; then
+        log_error "Agent returned an error instead of a plan:"
+        head -3 "${_agent_out}" >&2
+        rm -f "${_agent_out}"
+        log_info "  Fix: check AGENT_MODEL is correct (e.g. claude-sonnet-4-6) and 9router is running."
+        return 1
+    fi
+
     # Extract PLAN.md content: strip any agent preamble before "# PLAN"
     if grep -q "^# PLAN" "${_agent_out}" 2>/dev/null; then
         awk '/^# PLAN/,0' "${_agent_out}" > "${_output_path}"
@@ -3767,7 +3777,7 @@ cmd_help() {
     By default, file-modifying commands (init, upgrade, doctor, sync, add,
     autoskills) spawn a Copilot CLI agent for validation or deep health check.
     Use --no-agent to disable agent spawning, or set SKIP_AGENT=true.
-    Agent model: controlled by AGENT_MODEL env var (default: claude-sonnet-4.6).
+    Agent model: controlled by AGENT_MODEL env var (default: claude-sonnet-4-6).
     Agent logs are saved to .parallel-dev/agent-logs/.
 
   SUPPORTED LANGUAGES:
@@ -3803,7 +3813,7 @@ cmd_help() {
     skeleton autoskills -y
 
   ENVIRONMENT VARIABLES:
-    AGENT_MODEL               Model for agent CLI (default: claude-sonnet-4.6)
+    AGENT_MODEL               Model for agent CLI (default: claude-sonnet-4-6)
     SKIP_AGENT                Set to 'true' to disable agent spawning globally
 
 EOF
