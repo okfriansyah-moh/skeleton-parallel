@@ -569,6 +569,16 @@ main() {
         router_auto_start_if_needed 2>/dev/null || true
     fi
 
+    # ── Create feature branch so Stage [6] can PR to main ─────────────────────
+    local _run_branch
+    _run_branch="feat/skeleton-run-$(date +%Y%m%d-%H%M%S)"
+    cd "${PROJECT_ROOT}"
+    if git rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
+        git checkout -b "${_run_branch}" 2>/dev/null \
+            && log_info "[run] Working on branch: ${_run_branch}" \
+            || { log_warn "[run] Could not create feature branch — staying on current branch"; _run_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"; }
+    fi
+
     # ── Stage 0: Execute tasks ────────────────────────────────────────────────
     log_step "════ Stage 0: Execute tasks ════"
     local stage0_rc=0
@@ -598,7 +608,7 @@ main() {
     fi
 
     log_step "════ Stages [2]-[6]: Integration pipeline ════"
-    _run_post_merge_stages "${tasks_str}" "${_mode}" || exit 1
+    _run_post_merge_stages "${tasks_str}" "${_mode}" "${_run_branch}" || exit 1
 
     exit 0
 }

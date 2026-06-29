@@ -115,6 +115,16 @@ validations = "\n".join(f"- {v}" for v in task.get("validation", []))
 
 prompt = f"""# Task {task_n} — {task.get("name", "")}
 
+> IMPLEMENTATION MODE: Implement this task immediately and completely.
+> Do NOT ask clarifying questions. Do NOT request design approval.
+> Do NOT say "I need more information". Create all files now.
+> For each file: output a fenced code block with the file path on the opening fence line.
+> Example:
+>   ```python backend/modules/market_data/models.py
+>   <file content here>
+>   ```
+> Write complete, production-ready code. Commit nothing — the pipeline handles git.
+
 **Status:** {task.get("status", "pending")}
 **Complexity:** {task.get("complexity", "")}
 **Depends on:** {deps}
