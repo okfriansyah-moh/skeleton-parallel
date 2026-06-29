@@ -128,6 +128,19 @@ _run_with_progress() {
 
 # ── Agent Helpers (provider-agnostic, ARES-aligned) ─────────────────────────
 
+# Ensure SKELETON_MODEL is exported for agent spawns.
+# Reads execution.cli.model from config/skeleton.yaml; no-op if already set.
+# Call this at the top of any cmd_* that spawns agents.
+_ensure_skeleton_model() {
+    local _dir="${1:-.}"
+    if [[ -z "${SKELETON_MODEL:-}" ]] && [[ -f "${_dir}/config/skeleton.yaml" ]]; then
+        local _m
+        _m="$(grep -E '^\s*model\s*:' "${_dir}/config/skeleton.yaml" 2>/dev/null \
+            | head -1 | sed 's/.*://;s/#.*//;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
+        [[ -n "${_m}" ]] && export SKELETON_MODEL="${_m}"
+    fi
+}
+
 # Detect the configured AI provider for a given project directory.
 # Reads config/skeleton.yaml; defaults to "copilot" for backward compatibility.
 _detect_provider_for_dir() {
@@ -2062,6 +2075,7 @@ cmd_doctor() {
     done
 
     target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || die "Directory not found: ${target_dir}"
+    _ensure_skeleton_model "${target_dir}"
 
     echo ""
     echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
@@ -2661,7 +2675,8 @@ cmd_sync() {
     log_ok "Sync complete!"
     echo ""
 
-    # Background validation (provider-aware)
+    # Background validation (provider-aware, model from config/skeleton.yaml)
+    _ensure_skeleton_model "${target_dir}"
     _spawn_agent_bg "${target_dir}" "doctor" \
         "Validate post-sync state: 1) .ai/skills/ and .ai/agents/ match upstream (${SKELETON_ROOT}). 2) Provider harness file is current (run 'ars compose' if stale). 3) run_parallel.sh is executable. 4) No custom configurations were accidentally overwritten. Report findings in .parallel-dev/agent-logs/." \
         "sync-validation"
