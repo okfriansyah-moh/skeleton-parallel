@@ -86,6 +86,19 @@ _validate_project_name() {
     fi
 }
 
+# ── Shared spinner (used by _spawn_agent and _plan_spawn_agent) ──────────────
+# Usage: _skeleton_spinner <pid>  — shows braille spinner until pid exits
+_skeleton_spinner() {
+    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local i=0
+    while kill -0 "$1" 2>/dev/null; do
+        printf '\r  %s  Working...' "${frames[$((i % 10))]}"
+        (( i++ )) || true
+        sleep 0.12
+    done
+    printf '\r\033[K'  # clear spinner line
+}
+
 # ── Agent Helpers (provider-agnostic, ARES-aligned) ─────────────────────────
 
 # Detect the configured AI provider for a given project directory.
@@ -180,15 +193,22 @@ _spawn_agent() {
             ;;
         claude)
             _require_agent_cli "claude"
+            log_info "  Log: ${log_file}"
+            log_info "  (this may take 1-3 min — tail -f \"${log_file}\" to follow)"
             (
                 cd "${work_dir}"
                 claude \
                     -p "${full_prompt}" \
                     --model="${_active_model}" \
                     --allowedTools all \
-                    2>&1 | tee "${log_file}"
-            )
-            exit_code=${PIPESTATUS[0]:-$?}
+                    2>&1
+            ) > "${log_file}" &
+            local _claude_pid=$!
+            _skeleton_spinner "${_claude_pid}"
+            wait "${_claude_pid}"; exit_code=$?
+            if [[ -s "${log_file}" ]]; then
+                cat "${log_file}"
+            fi
             ;;
         codex)
             _require_agent_cli "codex"
@@ -3387,18 +3407,6 @@ _plan_spawn_agent() {
 
     log_step "Spawning plan-management agent (provider: ${_provider}, model: ${AGENT_MODEL})..."
 
-    # Spinner shown while agent runs (output captured to temp file, not streamed)
-    _plan_spinner() {
-        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
-        local i=0
-        while kill -0 "$1" 2>/dev/null; do
-            printf '\r  %s  Working...' "${frames[$((i % 10))]}"
-            (( i++ )) || true
-            sleep 0.12
-        done
-        printf '\r\033[K'  # clear spinner line
-    }
-
     case "${_provider}" in
         claude)
             ( cd "${_work_dir}"
@@ -3409,7 +3417,7 @@ _plan_spawn_agent() {
                   --allowedTools none \
                   2>&1
             ) > "${_agent_out}" || true &
-            _plan_spinner $!
+            _skeleton_spinner $!
             wait $! || true
             ;;
         copilot)
