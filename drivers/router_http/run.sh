@@ -363,6 +363,8 @@ ALLOWED_EXTS = {
     ".py", ".toml", ".cfg", ".ini", ".yaml", ".yml",
     ".sh", ".txt", ".md", ".json", ".env.example",
     ".gitignore", ".dockerignore",
+    ".plist", ".ps1", ".xml", ".sql", ".tf", ".tfvars",
+    ".tsx", ".ts", ".js", ".jsx", ".css", ".html",
 }
 PROTECTED_FILES = {"docs/PLAN.md", "config/skeleton.yaml", ".ai/manifest.yaml"}
 
