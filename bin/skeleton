@@ -3384,6 +3384,7 @@ _plan_spawn_agent() {
     case "${_provider}" in
         claude)
             ( cd "${_work_dir}"
+              unset ANTHROPIC_BASE_URL   # use claude CLI's own OAuth directly, not 9router
               claude -p "${_prompt}" \
                   --model="${AGENT_MODEL}" \
                   --allowedTools none \
