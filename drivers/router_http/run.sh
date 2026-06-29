@@ -104,6 +104,108 @@ _assemble_system_prompt() {
     printf '%s\n' "${parts[@]}"
 }
 
+# ── _apply_file_changes ───────────────────────────────────────────────────────
+# Extract fenced code blocks with file paths from the LLM response and write
+# them to disk. Supports two annotation formats:
+#   ```python path/to/file.py        ← inline path after language
+#   # path/to/file.py                ← first comment line inside block
+#
+# Skips assessment/review stages where file writes are not expected.
+#
+# Usage: _apply_file_changes <log_file> <work_dir> <stage>
+_apply_file_changes() {
+    local log_file="$1"
+    local work_dir="$2"
+    local stage="$3"
+
+    # Stages that only produce text reports — never write files
+    case "${stage}" in
+        post-merge-review|docs-sync|test-sufficiency|acceptance-llm|security-auditor)
+            return 0 ;;
+    esac
+
+    [[ -f "${log_file}" ]] || return 0
+
+    python3 - "${log_file}" "${work_dir}" "${stage}" <<'PYEOF' 2>/dev/null || true
+import sys, json, re, os, pathlib
+
+log_path  = sys.argv[1]
+work_dir  = sys.argv[2]
+stage     = sys.argv[3]
+
+# ── Decode SSE stream → plain text ───────────────────────────────────────────
+text_parts = []
+for line in open(log_path, encoding="utf-8", errors="replace"):
+    line = line.rstrip("\n")
+    if line.startswith("data:"):
+        payload = line[5:].strip()
+        if payload in ("", "[DONE]"):
+            continue
+        try:
+            chunk = json.loads(payload)
+            for choice in chunk.get("choices", []):
+                content = (choice.get("delta") or choice.get("message") or {}).get("content") or ""
+                text_parts.append(content)
+        except Exception:
+            pass
+    else:
+        text_parts.append(line + "\n")
+
+full_text = "".join(text_parts)
+
+# ── Extract fenced code blocks ────────────────────────────────────────────────
+# Pattern: ```<lang> [optional/path.py]\n<code>\n```
+FENCE_RE = re.compile(
+    r"```(?P<lang>[a-zA-Z0-9_+-]*)[ \t]*(?P<inline_path>[^\n`]*?)\n"
+    r"(?P<body>.*?)"
+    r"```",
+    re.DOTALL,
+)
+
+written = 0
+for m in FENCE_RE.finditer(full_text):
+    lang        = m.group("lang").strip()
+    inline_path = m.group("inline_path").strip()
+    body        = m.group("body")
+
+    # Determine file path
+    file_path = inline_path
+
+    # Fallback: first line of block if it looks like a comment with a path
+    if not file_path:
+        first_line = body.split("\n", 1)[0].strip()
+        comment_path = re.match(r'^[#/]{1,2}\s*([\w./\-]+\.\w+)', first_line)
+        if comment_path:
+            file_path = comment_path.group(1)
+            # Remove the comment line from body
+            body = body.split("\n", 1)[1] if "\n" in body else body
+
+    if not file_path:
+        continue
+
+    # Security: reject absolute paths, path traversal, or paths outside work_dir
+    if file_path.startswith("/") or ".." in file_path:
+        continue
+
+    # Only write known source extensions (never overwrite config/docs/PLAN.md)
+    allowed_exts = {".py", ".toml", ".cfg", ".ini", ".yaml", ".yml",
+                    ".sh", ".txt", ".md", ".json", ".env.example"}
+    if pathlib.Path(file_path).suffix not in allowed_exts:
+        continue
+    if file_path in ("docs/PLAN.md", "config/skeleton.yaml", ".ai/manifest.yaml"):
+        continue
+
+    dest = pathlib.Path(work_dir) / file_path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(body, encoding="utf-8")
+    written += 1
+    print(f"[router_http] wrote: {file_path}")
+
+if written:
+    print(f"[router_http] {stage}: applied {written} file(s) from LLM response")
+PYEOF
+}
+
 # ── run_driver ────────────────────────────────────────────────────────────────
 # Main driver entry point implementing the ExecutionDriver contract (spec §8.2).
 #
@@ -246,6 +348,8 @@ PYEOF
     case "${http_status}" in
         200|201)
             log_ok "[${stage}] router_http completed (HTTP ${http_status})"
+            # Apply file changes from the LLM response (extract code blocks → write to disk)
+            _apply_file_changes "${log_file}" "${work_dir}" "${stage}"
             return 0
             ;;
         429)

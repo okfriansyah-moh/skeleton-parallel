@@ -144,12 +144,24 @@ run_5c() {
 
     log_step "[5c] Test-builder sufficiency check"
 
+    # Skip gracefully when no source files exist yet (pre-implementation state)
+    local _py_count
+    _py_count="$(find "${project_root}" \
+        -path "${project_root}/.git" -prune -o \
+        -path "${project_root}/.skeleton-dev" -prune -o \
+        -name "*.py" -print 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "${_py_count}" -eq 0 ]]; then
+        log_info "[5c] No Python source files found — test sufficiency N/A at this stage"
+        run_status_write "global-validation-5c" "test-builder" "SUFFICIENT"
+        return 0
+    fi
+
     local attempt=0
     while (( attempt < MAX_RETRIES_ACCEPTANCE )); do
         (( attempt++ ))
         log_info "[5c] Test-builder sufficiency attempt ${attempt}/${MAX_RETRIES_ACCEPTANCE}"
 
-        local model="${SKELETON_MODEL:-claude-sonnet-4.6}"
+        local model="${SKELETON_MODEL:-claude-sonnet-4-6}"
         local log_file="${project_root}/.skeleton-dev/logs/test-sufficiency-${attempt}.log"
         mkdir -p "$(dirname "${log_file}")"
 
@@ -160,7 +172,7 @@ run_5c() {
 Test-builder sufficiency assessment (attempt ${attempt}/${MAX_RETRIES_ACCEPTANCE}).
 Assess whether the test suite adequately covers the implemented functionality.
 Review: unit tests, integration tests, edge cases, error paths.
-MANDATORY: End your response with exactly one of:
+MANDATORY: End your response with exactly one of these lines (no extra text after it):
   VERDICT: SUFFICIENT
   VERDICT: NEEDS_TESTS
   VERDICT: NEEDS_FIX
@@ -173,10 +185,35 @@ PROMPT
         local rc=$?
         rm -f "${prompt_file}"
 
-        # Parse verdict from log
+        # Parse verdict — handles both plain text and SSE JSON stream format
         local verdict="UNKNOWN"
         if [[ -f "${log_file}" ]]; then
-            verdict="$(grep -oE 'VERDICT: (SUFFICIENT|NEEDS_TESTS|NEEDS_FIX)' "${log_file}" \
+            # Strip SSE/JSON wrapper: extract text content from streaming chunks first
+            local _plain_text
+            _plain_text="$(python3 - "${log_file}" <<'PYEOF' 2>/dev/null || cat "${log_file}"
+import sys, json, re
+
+text = []
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    line = line.strip()
+    if line.startswith("data:"):
+        payload = line[5:].strip()
+        if payload in ("", "[DONE]"):
+            continue
+        try:
+            chunk = json.loads(payload)
+            for choice in chunk.get("choices", []):
+                content = (choice.get("delta") or choice.get("message") or {}).get("content") or ""
+                text.append(content)
+        except Exception:
+            text.append(line)
+    else:
+        text.append(line)
+print("".join(text))
+PYEOF
+)"
+            verdict="$(echo "${_plain_text}" \
+                | grep -oE 'VERDICT: (SUFFICIENT|NEEDS_TESTS|NEEDS_FIX)' \
                 | tail -1 | sed 's/VERDICT: //' || echo 'UNKNOWN')"
         fi
 
