@@ -95,7 +95,7 @@ _detect_provider_for_dir() {
     local p=""
     if [[ -f "${dir}/config/skeleton.yaml" ]]; then
         p="$(grep -E '^\s*provider\s*:' "${dir}/config/skeleton.yaml" \
-            2>/dev/null | head -1 | sed 's/.*://;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
+            2>/dev/null | head -1 | sed 's/.*://;s/#.*//;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
     fi
     echo "${p:-copilot}"
 }
@@ -2143,7 +2143,7 @@ cmd_doctor() {
     # Infer provider from config/skeleton.yaml if not set via SKELETON_PROVIDER
     if [[ -z "${_provider}" ]] && [[ -f "${target_dir}/config/skeleton.yaml" ]]; then
         _provider="$(grep -E '^\s*provider\s*:' "${target_dir}/config/skeleton.yaml" \
-            2>/dev/null | head -1 | sed 's/.*://;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
+            2>/dev/null | head -1 | sed 's/.*://;s/#.*//;s/[[:space:]]//g;s/"//g;s/'"'"'//g')"
     fi
     _provider="${_provider:-copilot}"
 
