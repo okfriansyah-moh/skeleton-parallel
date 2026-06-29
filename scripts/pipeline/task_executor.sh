@@ -330,9 +330,37 @@ _run_quality_gates_t1() {
         (( attempt++ ))
         log_warn "[${task_label}] T1 quality gates failed (refactor ${attempt}/${MAX_T1_REFACTOR})"
 
-        local prompt_file="${work_dir}/.skeleton-dev/TASK_PROMPT.md"
+        # Capture actual gate output so the refactor agent knows exactly what to fix
+        local _gate_output
+        _gate_output="$(bash "${work_dir}/scripts/hooks/quality-gates.sh" 2>&1 || true)"
+
+        local prompt_file
+        prompt_file="$(mktemp)"
+        cat > "${prompt_file}" <<REFACTOR_PROMPT
+# Refactor — Fix Quality Gate Failures (attempt ${attempt}/${MAX_T1_REFACTOR})
+
+The following quality gate errors MUST be fixed. Read each file listed,
+fix the specific issue, and save it using write_file.
+
+## Quality Gate Output
+
+\`\`\`
+${_gate_output}
+\`\`\`
+
+## Instructions
+
+1. For EACH error line above: identify the file path and line number
+2. Use read_file to read that file
+3. Fix the exact issue (remove unused import, fix syntax, etc.)
+4. Use write_file to save the corrected version
+5. Do NOT touch docs/PLAN.md or config/skeleton.yaml
+6. After all fixes, confirm briefly — do not explain what you would do, just do it
+REFACTOR_PROMPT
+
         local log_file="${log_dir}/${task_label}-refactor-t1-${attempt}.log"
         _invoke_driver "refactor" "${work_dir}" "${prompt_file}" "${model}" "${log_file}" || true
+        rm -f "${prompt_file}"
 
         if run_hook "quality-gates" "false"; then
             log_ok "[${task_label}] T1 quality gates passed after refactor ${attempt}"
