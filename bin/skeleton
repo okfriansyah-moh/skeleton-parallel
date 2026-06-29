@@ -3461,7 +3461,7 @@ _plan_spawn_agent() {
     rm -f "${_agent_out}"
 
     local _task_count
-    _task_count="$(grep -c "^\*\*ID:\*\*\|^### Task" "${_output_path}" 2>/dev/null || echo 0)"
+    _task_count="$(grep -c "^\*\*ID:\*\*" "${_output_path}" 2>/dev/null || echo 0)"
     log_ok "PLAN.md written: ${_output_path} (${_task_count} tasks)"
     printf '\n'
     log_info "  ${BOLD}Review${NC} ${_output_path} — verify task names, deps, file paths"
