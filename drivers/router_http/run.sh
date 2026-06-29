@@ -89,37 +89,137 @@ _assemble_system_prompt() {
     skills_csv="$(build_skills_csv "${extra_skills}")"
     parts+=("## Skills"$'\n'"MANDATORY: Use the following skills as primary knowledge sources:"$'\n'"${skills_csv}")
 
-    # ── Component 3: Project .ai/skills/ — name + description only ───────────
-    # Include the first 25 non-blank lines of each skill body (after frontmatter).
-    # 25 lines ≈ 350 tokens per skill × 30 skills ≈ ~10k tokens total — enough
-    # for the model to apply actual rules (naming, type annotations, forbidden
-    # patterns) without the 191KB bloat of the original full-content approach.
+    # ── Component 3: Cherry-picked skills — stage + task content aware ──────────
+    # Instead of loading all 30 skills, select only what this stage and task need:
+    #   1. Always-on core:  code-quality, coding-standards (every stage, every task)
+    #   2. Stage-fixed:     skills hardwired to this pipeline stage
+    #   3. Task-content:    keywords in the task description trigger extra skills
+    # Each selected skill gets its first 25 non-blank body lines (~350 tokens).
+    # Result: ~2-4k tokens of focused, relevant rules vs 10k for all-skills dump.
     local ai_skills_dir="${work_dir}/.ai/skills"
     if [[ -d "${ai_skills_dir}" ]]; then
         local skill_summary=""
-        while IFS= read -r -d '' skill_file; do
-            local excerpt
-            excerpt="$(python3 - "${skill_file}" <<'PYEOF' 2>/dev/null || true
-import sys, pathlib
-lines = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
-# Skip YAML frontmatter (between --- markers)
-body_start = 0
-if lines and lines[0].strip() == "---":
-    for i, l in enumerate(lines[1:], 1):
-        if l.strip() == "---":
-            body_start = i + 1
-            break
-# First 25 non-blank body lines
-body = [l for l in lines[body_start:] if l.strip()]
-print("\n".join(body[:25]))
+        skill_summary="$(python3 - \
+            "${ai_skills_dir}" "${stage}" \
+            "${work_dir}/${SKELETON_PLAN:-docs/PLAN.md}" \
+            "${SKELETON_TASK_NUMBER:-0}" <<'PYEOF' 2>/dev/null || true
+import sys, json, pathlib, re
+
+skills_dir   = pathlib.Path(sys.argv[1])
+stage        = sys.argv[2]
+plan_path    = pathlib.Path(sys.argv[3])
+task_n       = sys.argv[4]
+
+# ── 1. Always-on core skills (every call) ────────────────────────────────────
+ALWAYS = {"code-quality", "coding-standards"}
+
+# ── 2. Stage-fixed skills ────────────────────────────────────────────────────
+STAGE_SKILLS = {
+    "task-runner":       {"plan-management", "modularity", "determinism", "vertical-slice"},
+    "dto-guardian":      {"dto", "modularity", "coding-standards"},
+    "integration":       {"modularity", "determinism", "idempotency", "failure"},
+    "test-builder":      {"test-generation", "test-driven-development", "determinism"},
+    "security-auditor":  {"security-audit"},
+    "refactor":          {"code-quality", "coding-standards", "performance-optimization", "modularity"},
+    "merge-reviewer":    {"docs-sync", "conflict-resolution", "plan-management"},
+    "docs-sync":         {"docs-sync", "plan-management"},
+    "post-merge-review": {"docs-sync", "plan-management"},
+    "test-sufficiency":  {"test-generation", "code-quality"},
+    "acceptance-llm":    {"plan-management", "code-quality"},
+    "feedback-refactor": {"code-quality", "coding-standards", "modularity"},
+    "feedback-test-builder": {"test-generation", "test-driven-development"},
+}
+
+# ── 3. Task-content keyword → extra skills ────────────────────────────────────
+KEYWORD_SKILLS = {
+    # Data / storage / persistence
+    r"database|postgres|sqlite|sql|migrat|schema|orm|model|repositor|persist|upsert|row|table|query|fetch":
+        {"database-portability", "dto", "determinism"},
+    # API / HTTP / service boundaries  (no \b — simpler, more permissive)
+    "api|endpoint|rest|http|fastapi|flask|router|webhook|service|adapter|port":
+        {"api-design", "dto", "security-audit"},
+    # Performance / optimisation
+    "perform|optim|cache|batch|latency|throughput|speed|slow|index|vectori":
+        {"performance-optimization", "determinism"},
+    # Infrastructure / deployment / config
+    "docker|infra|deploy|scheduler|cron|launchd|config|secret|setup|install":
+        {"config-validation", "security-audit", "determinism"},
+    # Testing
+    "test|pytest|coverage|fixture|mock|stub|assert|scenario|acceptance":
+        {"test-generation", "test-driven-development"},
+    # Async / concurrency / job entrypoints
+    "async|await|concurren|parallel|thread|queue|worker|job|entrypoint":
+        {"determinism", "idempotency", "failure"},
+    # DTOs / contracts / dataclasses
+    "dto|contract|dataclass|pydantic|frozen|serialize|deserializ|canonical":
+        {"dto", "modularity"},
+    # Dependency / package management
+    "dependency|package|library|pip|poetry|pyproject|requirement":
+        {"dependency-analysis", "modularity"},
+    # Security / credentials
+    "auth|secret|token|credential|permission|encrypt|hash|telegram":
+        {"security-audit", "config-validation"},
+    # Subagent / orchestration
+    "orchestrat|subagent|pipeline|stage|workflow|runner":
+        {"subagent-driven-development", "parallel-dev", "plan-management"},
+    # Data migration / versioning
+    "backfill|rollback|upgrade|alembic|flyway|migration":
+        {"migration-management", "idempotency", "database-portability"},
+    # Scoring / ranking / ML-adjacent
+    "scor|rank|signal|weight|calibrat|backtest|outcome|metric|threshold":
+        {"performance-optimization", "determinism", "vertical-slice"},
+    # Delivery / notification / formatting
+    "telegram|notification|deliver|format|render|report|message|alert":
+        {"vertical-slice", "failure", "idempotency"},
+}
+
+# ── Collect skill names to load ───────────────────────────────────────────────
+selected = set(ALWAYS)
+selected |= STAGE_SKILLS.get(stage, set())
+
+# Read task description from PLAN.md for keyword matching
+task_text = ""
+if plan_path.exists() and task_n and task_n != "0":
+    raw = plan_path.read_text(encoding="utf-8", errors="replace")
+    # Find the task section: ### Task N or ## Task N
+    m = re.search(
+        rf'(?m)^#{{1,3}}\s+Task\s+{re.escape(task_n)}\s[^\n]*([\s\S]+?)(?=^#{{1,3}}\s+Task\s+\d|\Z)',
+        raw
+    )
+    if m:
+        task_text = m.group(0).lower()
+
+for pattern, skills in KEYWORD_SKILLS.items():
+    if re.search(pattern, task_text):
+        selected |= skills
+
+# ── Load and excerpt each selected skill ─────────────────────────────────────
+def skill_excerpt(skill_name, max_lines=25):
+    skill_file = skills_dir / skill_name / "SKILL.md"
+    if not skill_file.exists():
+        return ""
+    lines = skill_file.read_text(encoding="utf-8", errors="replace").splitlines()
+    body_start = 0
+    if lines and lines[0].strip() == "---":
+        for i, l in enumerate(lines[1:], 1):
+            if l.strip() == "---":
+                body_start = i + 1
+                break
+    body = [l for l in lines[body_start:] if l.strip()]
+    return "\n".join(body[:max_lines])
+
+parts = []
+# Always-on first, then alphabetical
+for name in sorted(selected, key=lambda s: (s not in ALWAYS, s)):
+    exc = skill_excerpt(name)
+    if exc:
+        parts.append(f"### Skill: {name}\n{exc}")
+
+print("\n\n".join(parts))
 PYEOF
 )"
-            if [[ -n "${excerpt}" ]]; then
-                skill_summary+="${excerpt}"$'\n\n---\n'
-            fi
-        done < <(find "${ai_skills_dir}" -name "SKILL.md" -print0 2>/dev/null | sort -z)
         if [[ -n "${skill_summary}" ]]; then
-            parts+=("## Project Skills (key rules — 25 lines each)"$'\n'"${skill_summary}")
+            parts+=("## Selected Skills (stage: ${stage}, task: ${SKELETON_TASK_NUMBER:-?})"$'\n'"${skill_summary}")
         fi
     fi
 
