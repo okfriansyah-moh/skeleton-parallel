@@ -657,6 +657,18 @@ def emit(line):
 rate_limited = False
 error_exit   = False
 
+# ── Zero-output tracking (per-model + global) ─────────────────────────────────
+# A single model returning empty responses (e.g. Cursor/default when it lacks
+# tool-calling support) should not abort the loop — the round-robin will cycle
+# past it to a capable model. Only abort when:
+#   (a) multiple distinct models are degraded (≥2 with ≥3 zero-outputs each), OR
+#   (b) total zero-outputs across all models exceeds the global safety cap.
+PER_MODEL_ZERO_LIMIT = 3   # zero-outputs before a model is marked degraded
+GLOBAL_ZERO_LIMIT    = 12  # hard cap across all models combined
+_zero_per_model  = {}      # model_name -> zero-output count
+_degraded_models = set()
+_global_zero_count = 0
+
 for iteration in range(MAX_ITER):
     emit(f"[router_http] iteration {iteration + 1}/{MAX_ITER} — calling {endpoint}")
     status, raw = chat_request(messages)
@@ -708,20 +720,28 @@ for iteration in range(MAX_ITER):
     # cu/default (Cursor AI) returns finish_reason='stop', content=null,
     # tool_calls=[], completion_tokens=0. Retry so the round-robin advances
     # to a tool-capable slot (cc/claude-sonnet-4-6 or cx/gpt-5.4).
-    # After 6 consecutive zero-output responses (2 full round-robin cycles),
-    # give up — all models in the rotation are likely unavailable.
+    # Tracking is per-model: one bad model in the combo doesn't abort the loop;
+    # only ≥2 distinct degraded models or hitting the global cap does.
     usage = resp_json.get("usage", {})
     comp_tokens = usage.get("completion_tokens", -1)
     if not text_content and not tool_calls and comp_tokens == 0:
         actual_model = resp_json.get("model", "unknown")
-        zero_output_count = getattr(chat_request, "_zero_output_count", 0) + 1
-        chat_request._zero_output_count = zero_output_count
-        emit(f"[router_http] zero-output from model={actual_model!r} (count={zero_output_count}) — retrying next slot")
-        if zero_output_count >= 6:
-            emit(f"[router_http] too many zero-output responses — all models unavailable")
+        _zero_per_model[actual_model] = _zero_per_model.get(actual_model, 0) + 1
+        _global_zero_count += 1
+        model_count = _zero_per_model[actual_model]
+        if model_count >= PER_MODEL_ZERO_LIMIT:
+            _degraded_models.add(actual_model)
+        emit(f"[router_http] zero-output from model={actual_model!r} (model={model_count}, total={_global_zero_count}) — retrying next slot")
+        # Abort only when multiple models are degraded OR global cap is hit
+        if len(_degraded_models) >= 2:
+            emit(f"[router_http] multiple models degraded {sorted(_degraded_models)} — all models unavailable")
             error_exit = True
             break
-        # Don't append this empty turn; just retry (advances round-robin)
+        if _global_zero_count >= GLOBAL_ZERO_LIMIT:
+            emit(f"[router_http] global zero-output cap ({GLOBAL_ZERO_LIMIT}) reached — aborting")
+            error_exit = True
+            break
+        # Single degraded model — keep cycling (round-robin will advance past it)
         continue
 
     # Append assistant turn
